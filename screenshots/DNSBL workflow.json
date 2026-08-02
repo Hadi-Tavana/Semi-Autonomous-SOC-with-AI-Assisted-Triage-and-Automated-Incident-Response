@@ -1,0 +1,131 @@
+{
+  "name": "DNSBL workflow",
+  "nodes": [
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "={{ $json.body }}\n",
+        "options": {
+          "responseCode": 200,
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Content-Type",
+                "value": "text/plain"
+              }
+            ]
+          }
+        }
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        816,
+        0
+      ],
+      "id": "dc583403-19f6-42f9-9ae1-5b15faf6736c",
+      "name": "Respond to Webhook1"
+    },
+    {
+      "parameters": {
+        "jsCode": "const rows = items.map(i => i.json.domain).filter(Boolean);\n\nreturn [\n  {\n    json: {\n      body: rows.join('\\n')\n    }\n  }\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        560,
+        0
+      ],
+      "id": "4a9c218e-4f42-452d-9d34-e44feba23d34",
+      "name": "Code in JavaScript"
+    },
+    {
+      "parameters": {
+        "path": "dnsbl/domains",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        0
+      ],
+      "id": "a92346cf-d0e9-4586-a8c5-3b8a5a65103e",
+      "name": "dnsbl webhook",
+      "webhookId": "d2021140-3b01-47d6-ac56-266d9f422ea8"
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "value": "v7ctNSXYI1WiBdkZ",
+          "mode": "list",
+          "cachedResultName": "malicious_domains",
+          "cachedResultUrl": "/projects/iepneOJcbZRD9xW1/datatables/v7ctNSXYI1WiBdkZ"
+        },
+        "returnAll": true
+      },
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1,
+      "position": [
+        288,
+        0
+      ],
+      "id": "f2d983fa-b702-4eea-8e7b-62e642550f8e",
+      "name": "get domains"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Respond to Webhook1": {
+      "main": [
+        []
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "dnsbl webhook": {
+      "main": [
+        [
+          {
+            "node": "get domains",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "get domains": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "46bcbb9b-8e1f-49c3-afe3-b359698b792a",
+  "meta": {
+    "instanceId": "6175e97e0865c485819f10cbbdadf041641f45b48c7192bd60d25444ae086a9b"
+  },
+  "id": "lvV19UyOBMS2W8uX",
+  "tags": []
+}

@@ -1,0 +1,370 @@
+{
+  "name": "Dispatcher",
+  "nodes": [
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 1
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.type }}",
+                    "rightValue": "=ip",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "c8d0e604-03d1-423b-aa3a-f7831a67d062"
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 1
+                },
+                "conditions": [
+                  {
+                    "id": "6292dccb-63d1-46c3-a42d-a3f680d492de",
+                    "leftValue": "={{ $json.type }}",
+                    "rightValue": "domain",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 1
+                },
+                "conditions": [
+                  {
+                    "id": "b1b51203-9ffe-4c3b-831a-68e1f28225bc",
+                    "leftValue": "={{ $json.type }}",
+                    "rightValue": "hash",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 1
+                },
+                "conditions": [
+                  {
+                    "id": "74d7979e-303e-4c37-9d43-9b46aa19957a",
+                    "leftValue": "={{ $json.type }}",
+                    "rightValue": "cve",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 1
+                },
+                "conditions": [
+                  {
+                    "id": "1e5bdf0e-2121-4b1b-8aee-890ea57a0d4b",
+                    "leftValue": "={{ $json.title }}",
+                    "rightValue": "/(nmap|base64)/i",
+                    "operator": {
+                      "type": "string",
+                      "operation": "regex"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "OTHER"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "d586a8cc-a479-46c3-b217-3e5eb44a5940",
+      "name": "Switch",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [
+        -736,
+        -192
+      ]
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "X6g4a8YVhJBIzqvX",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/X6g4a8YVhJBIzqvX",
+          "cachedResultName": "IP Reputation Github"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {}
+        },
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        -400,
+        -416
+      ],
+      "id": "cccc9935-1bcd-4267-a58a-3d760ca387d5",
+      "name": "IP"
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "f9CdFBT3MYOMRw0a",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/f9CdFBT3MYOMRw0a",
+          "cachedResultName": "Hash Workflow Edited"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        -400,
+        64
+      ],
+      "id": "37aab134-834b-4497-80d4-fd4f97192de9",
+      "name": "Hash"
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "aPRYammrijyEE4E7",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/aPRYammrijyEE4E7",
+          "cachedResultName": "Domain Reputation"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {}
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        -400,
+        -224
+      ],
+      "id": "569a264c-af26-45bb-9420-8d3dbe33401b",
+      "name": "Domain"
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "UxFXNMJsBKRZwium",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/UxFXNMJsBKRZwium",
+          "cachedResultName": "CVE Info GitHub"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {}
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        -400,
+        240
+      ],
+      "id": "bffa8dd8-e72a-4deb-9e28-548e90617d62",
+      "name": "CVE Info"
+    },
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -1024,
+        -144
+      ],
+      "id": "fa036c6f-2f49-4d93-bd2b-88ee8f673167",
+      "name": "When Executed by AI Agent Workflow"
+    },
+    {
+      "parameters": {
+        "numberInputs": 5
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        -80,
+        -192
+      ],
+      "id": "ff16f57b-085f-467c-a0eb-76ffaf932a0a",
+      "name": "Merge",
+      "alwaysOutputData": true
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Switch": {
+      "main": [
+        [
+          {
+            "node": "IP",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Domain",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Hash",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "CVE Info",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 4
+          }
+        ]
+      ]
+    },
+    "IP": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Hash": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 2
+          }
+        ]
+      ]
+    },
+    "Domain": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "CVE Info": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 3
+          }
+        ]
+      ]
+    },
+    "When Executed by AI Agent Workflow": {
+      "main": [
+        [
+          {
+            "node": "Switch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "cc188f96-a059-47d7-8941-6ab4ed4a4a96",
+  "meta": {
+    "instanceId": "6175e97e0865c485819f10cbbdadf041641f45b48c7192bd60d25444ae086a9b"
+  },
+  "id": "2YacymO2ni8CneaM",
+  "tags": []
+}

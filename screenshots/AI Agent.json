@@ -1,0 +1,1685 @@
+{
+  "name": "AI Agent",
+  "nodes": [
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -1856,
+        48
+      ],
+      "id": "b6c38930-103f-4566-8e83-e1a33206a188",
+      "name": "When Executed by Main Workflow"
+    },
+    {
+      "parameters": {
+        "jsCode": "// -------------------- CUSTOM FIELDS --------------------\nfunction cfMap(customFields = {}) {\n  const out = {};\n\n  for (const [key, val] of Object.entries(customFields)) {\n    if (!val) continue;\n\n    const extracted =\n      val.string ??\n      val.integer ??\n      val.boolean ??\n      val.float ??\n      val.date ??\n      null;\n\n    out[key] = extracted;\n  }\n\n  return out;\n}\n\n// -------------------- DESCRIPTION PARSING --------------------\nfunction extractFirstLastSeen(description = \"\") {\n  const firstMatch = description.match(/First seen\\s*:\\s*([^\\n]+)/i);\n  const lastMatch  = description.match(/Last seen\\s*:\\s*([^\\n]+)/i);\n\n  return {\n    first_seen: firstMatch ? firstMatch[1].trim() : null,\n    last_seen: lastMatch ? lastMatch[1].trim() : null\n  };\n}\n\n// -------------------- NORMALIZERS --------------------\nfunction normalizeBool(v) {\n  if (v === true || v === false) return v;\n  if (v == null) return null;\n  const s = String(v).trim().toLowerCase();\n  if ([\"true\", \"yes\", \"1\"].includes(s)) return true;\n  if ([\"false\", \"no\", \"0\"].includes(s)) return false;\n  return null;\n}\n\nfunction normalizeHostname(v) {\n  if (!v || typeof v !== \"string\") return null;\n  return v.trim().toLowerCase();\n}\n\nfunction normalizeIP(v) {\n  if (!v || typeof v !== \"string\") return null;\n  return v.trim();\n}\n\n// -------------------- ARTIFACT EXTRACTION --------------------\nfunction extractArtifactsSmart(artifacts = []) {\n  const out = {\n    src_ip: null,\n    dst_ip: null,\n    domain: null,\n    urls: [],\n    user_agent: null,\n    process_names: [],\n    command_lines: [],\n    file_paths: [],\n    hashes: [],\n    ports: [],\n    raw: []\n  };\n\n  for (const a of artifacts) {\n    if (!a?.data || !a?.dataType) continue;\n\n    const v = String(a.data).trim();\n    const t = a.dataType;\n\n    out.raw.push({ type: t, value: v });\n\n    if (t === \"ip\") {\n      if (!out.src_ip) out.src_ip = v;\n      else if (!out.dst_ip) out.dst_ip = v;\n      continue;\n    }\n\n    if (t === \"domain\") {\n      out.domain = v;\n      continue;\n    }\n\n    if (t === \"url\") {\n      out.urls.push(v);\n      continue;\n    }\n\n    if (t === \"user-agent\") {\n      out.user_agent = v;\n      continue;\n    }\n\n    if (t === \"hash\") {\n      out.hashes.push(v);\n      continue;\n    }\n\n    if (t === \"other\") {\n      const lower = v.toLowerCase();\n\n      if (lower.endsWith(\".exe\")) {\n        out.process_names.push(v);\n      }\n\n      if (v.includes(\" \") && (v.includes(\".exe\") || v.includes(\"-\"))) {\n        out.command_lines.push(v);\n      }\n\n      if (v.includes(\"\\\\\") || v.includes(\"/\")) {\n        out.file_paths.push(v);\n      }\n\n      if (/^\\d{2,5}$/.test(v)) {\n        out.ports.push(v);\n      }\n    }\n  }\n\n  return out;\n}\n\n// -------------------- CLASSIFICATION --------------------\nfunction classifyAlert(a) {\n  const title = (a.title || \"\").toLowerCase();\n  const source = (a.source || \"\").toLowerCase();\n  const role = `${a.src_role || \"\"} ${a.dst_role || \"\"}`.toLowerCase();\n\n  if (\n    title.includes(\"powershell\") ||\n    title.includes(\"encodedcommand\") ||\n    title.includes(\"iex\")\n  ) {\n    return {\n      alert_type: \"powershell_execution\",\n      playbook: \"windows_powershell_investigation\",\n      default_time_window_minutes: 5,\n      elastic_targets: [\"endpoint_process\", \"powershell\", \"winlogbeat\"],\n      event_focus: [\"process\", \"network\", \"dns\"],\n      max_events: 20\n    };\n  }\n\n  if (\n    title.includes(\"file\") ||\n    title.includes(\"process\") ||\n    title.includes(\"webshell\")\n  ) {\n    if (role.includes(\"iis\") || role.includes(\"web server\")) {\n      return {\n        alert_type: \"web_file_or_process_activity\",\n        playbook: \"iis_webshell_or_process_investigation\",\n        default_time_window_minutes: 10,\n        elastic_targets: [\"endpoint_process\", \"endpoint_file\", \"iis\"],\n        event_focus: [\"process\", \"file\", \"network\"],\n        max_events: 20\n      };\n    }\n\n    return {\n      alert_type: \"windows_file_or_process_activity\",\n      playbook: \"windows_file_process_investigation\",\n      default_time_window_minutes: 5,\n      elastic_targets: [\"endpoint_process\", \"endpoint_file\"],\n      event_focus: [\"process\", \"file\"],\n      max_events: 20\n    };\n  }\n\n  if (\n    title.includes(\"scan\") ||\n    title.includes(\"nmap\") ||\n    source.includes(\"opnsense\")\n  ) {\n    return {\n      alert_type: \"network_scan_or_recon\",\n      playbook: \"network_scan_investigation\",\n      default_time_window_minutes: 3,\n      elastic_targets: [\"suricata\", \"firewall\"],\n      event_focus: [\"network\"],\n      max_events: 30\n    };\n  }\n\n  if (\n    title.includes(\"web\") ||\n    title.includes(\"http\")\n  ) {\n    return {\n      alert_type: \"web_activity\",\n      playbook: \"iis_web_investigation\",\n      default_time_window_minutes: 10,\n      elastic_targets: [\"iis\"],\n      event_focus: [\"web\", \"network\"],\n      max_events: 20\n    };\n  }\n\n  return {\n    alert_type: \"generic_security_alert\",\n    playbook: \"generic_investigation\",\n    default_time_window_minutes: 5,\n    elastic_targets: [\"endpoint_process\", \"suricata\"],\n    event_focus: [\"process\", \"network\"],\n    max_events: 15\n  };\n}\n\n// -------------------- OSINT TARGETS --------------------\nfunction buildOsintTargets(a) {\n  const targets = [];\n\n  if (a.src_ip) targets.push({ type: \"ip\", value: a.src_ip });\n  if (a.dst_ip) targets.push({ type: \"ip\", value: a.dst_ip });\n\n  if (a.domain) targets.push({ type: \"domain\", value: a.domain });\n\n  for (const u of a.urls || []) {\n    targets.push({ type: \"url\", value: u });\n  }\n\n  for (const h of a.hashes || []) {\n    targets.push({ type: \"hash\", value: h });\n  }\n\n  for (const c of a.command_lines || []) {\n    if (\n      c.toLowerCase().includes(\"http\") ||\n      c.toLowerCase().includes(\"powershell\")\n    ) {\n      targets.push({ type: \"command_line\", value: c });\n    }\n  }\n\n  return targets;\n}\n\n// -------------------- SUMMARY --------------------\nfunction buildSummary(a) {\n  return [\n    `${a.alert_type} from ${a.source}`,\n    a.src_ip && a.dst_ip ? `${a.src_ip} → ${a.dst_ip}` : null,\n    a.process_names?.length ? `proc: ${a.process_names.slice(0,2).join(\",\")}` : null,\n    a.urls?.length ? `url: ${a.urls[0]}` : null,\n    a.hashes?.length ? `hash: ${a.hashes[0].slice(0,12)}...` : null,\n    `priority=${a.soc_priority ?? \"n/a\"}`\n  ].filter(Boolean).join(\" | \");\n}\n\n// -------------------- MAIN --------------------\nreturn items.map(item => {\n  const j = item.json;\n\n  const cf = cfMap(j.customFields || {});\n  const seen = extractFirstLastSeen(j.description || \"\");\n  const artifacts = extractArtifactsSmart(j.artifacts || []);\n\n  const cleaned = {\n    alert_id: j._id || null,\n    title: j.title || null,\n    source: cf.detection_source || j.source || null,\n    severity: j.severity ?? null,\n    date: j.date || null,\n\n    alert_count: cf.alert_count ?? null,\n    asset_flow: cf.asset_flow || null,\n\n    src_ip: normalizeIP(cf.src_ip || artifacts.src_ip),\n    dst_ip: normalizeIP(cf.dst_ip || artifacts.dst_ip),\n\n    src_asset: normalizeHostname(cf.primary_asset || null),\n    src_role: cf.primary_role || null,\n    src_os: cf.primary_os || null,\n\n    soc_priority: cf.soc_priority ?? null,\n\n    domain: artifacts.domain,\n    urls: artifacts.urls,\n    user_agent: artifacts.user_agent,\n\n    process_names: artifacts.process_names,\n    command_lines: artifacts.command_lines,\n    file_paths: artifacts.file_paths,\n    hashes: artifacts.hashes,\n    ports: artifacts.ports,\n\n    first_seen: seen.first_seen,\n    last_seen: seen.last_seen\n  };\n\n  const classification = classifyAlert(cleaned);\n\n  Object.assign(cleaned, classification);\n\n  cleaned.osint_targets = buildOsintTargets(cleaned);\n\n  cleaned.summary_for_ai = buildSummary(cleaned);\n\n  return { json: cleaned };\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1184,
+        48
+      ],
+      "id": "1c589804-1f4a-4546-8ab2-183809157fe7",
+      "name": "Prepare Alerts"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Create a Tier 1 to Tier 3 handoff report for the following security alert:\n\n=== ALERT DATA ===\n{{ JSON.stringify($json, null, 2) }}\n=== END OF ALERT ===",
+        "needsFallback": true,
+        "options": {
+          "systemMessage": "You are an experienced SOC Tier 1 Analyst responsible for creating clear, precise, and professional handoff reports for Tier 3 analysts.\n\nYour task: Analyze the provided alert (including full context, asset information, process/command-line details, and OSINT summary) and write a concise, factual incident report.\n\nRules:\n- Use ONLY the data inside the === ALERT DATA === section. Never invent hostnames, IPs, users, dates, processes, or verdicts.\n- Be precise and evidence-based. If a field is missing or null, do not mention it.\n- Write in clear, professional SOC language (no fluff, no speculation).\n- Structure the report exactly in this order:\n  1. Alert Summary (one sentence)\n  2. Affected Asset & Context\n  3. Key Indicators & Evidence\n  4. OSINT Findings (especially VirusTotal verdict, known distributor, meaningful name)\n  5. Initial Assessment & Risk Level\n  6. Recommended Next Steps (max 4 bullet points)\n- Output ONLY the report in clean Markdown format. Do not add any explanations, JSON, or extra text outside the report.\n\nExamples:\n\n=== EXAMPLE 1 ===\n=== ALERT DATA ===\n{\"alert_id\":\"~60993704\",\"title\":\"ET INFO Packed Executable Download...\",\"src_ip\":\"185.40.106.198\",\"dst_ip\":\"192.168.1.120\",\"user_agent\":\"Microsoft-Delivery-Optimization/10.0\",\"domain\":\"3.au.download.windowsupdate.com\",\"alert_type\":\"benign_update_activity\",\"osint_summary\":{\"classification\":\"unknown\",\"reputation\":{\"abuse_score\":0}},\"final_verdict\":\"BENIGN\",\"occurrences\":4}\n=== END OF ALERT ===\n\n### Alert Summary\nBenign Windows Update traffic detected from external Microsoft CDN node to internal host 192.168.1.120.\n\n### Affected Asset & Context\nInternal host 192.168.1.120 (asset unknown, role Unknown) receiving update traffic.\n\n### Key Indicators & Evidence\n- Source IP: 185.40.106.198\n- Destination IP: 192.168.1.120\n- User-Agent: Microsoft-Delivery-Optimization/10.0\n- URL path contains msdownload/update/software/defu/...\n- Occurred 4 times\n\n### OSINT Findings\n- AbuseIPDB score: 0\n- Classification: unknown (data center / hosting)\n\n### Initial Assessment & Risk Level\nBenign Microsoft Windows Update activity (false positive from ET rules).\n\n### Recommended Next Steps\n- Whitelist the domain *.download.windowsupdate.com and IP range in firewall rules.\n- Suppress similar ET INFO Packed Executable Download alerts for this pattern.\n\n=== EXAMPLE 2 ===\n=== ALERT DATA ===\n{\"alert_id\":\"~51101880\",\"title\":\"IIS Worker Process Spawning Executable...\",\"src_asset\":\"webserver\",\"src_role\":\"IIS Web Server\",\"process_names\":[\"powershell.exe\"],\"command_lines\":[\"\\\"C:\\\\inetpub\\\\wwwroot\\\\mutillidae\\\\PrintSpoofer.exe\\\" ...\"],\"hashes\":[\"9d6f82c75b90cfad4907cf4eb8ec1ed57b21725a24257f444af46d9c486ba0cb\"],\"osint_summary\":{\"classification\":\"malicious\",\"detection\":{\"malicious\":55}},\"final_verdict\":\"MALICIOUS\"}\n=== END OF ALERT ===\n\n### Alert Summary\nMalicious PrintSpoofer privilege-escalation tool executed from IIS web directory on webserver.\n\n### Affected Asset & Context\nWebserver (IIS Web Server, Windows Server 2022).\n\n### Key Indicators & Evidence\n- Process: powershell.exe\n- Command line spawning PrintSpoofer.exe from \\inetpub\\wwwroot\\mutillidae\\\n- SHA256: 9d6f82c75b90cfad4907cf4eb8ec1ed57b21725a24257f444af46d9c486ba0cb\n\n### OSINT Findings\n- VirusTotal: 55/76 detections (malicious)\n- Known tool: PrintSpoofer (CVE-2021-1675 privilege escalation)\n- Classification: malicious\n\n### Initial Assessment & Risk Level\nHigh-confidence post-exploitation activity (web shell → privilege escalation). Risk level: HIGH.\n\n### Recommended Next Steps\n- Immediately isolate the webserver.\n- Create TheHive case with high priority and attach full command-line and hash.\n- Collect memory dump and process tree.\n- Scan for additional IOCs (Sandcat, Caldera C2 IPs).\n\nTone: Professional, neutral, factual — like a Tier 1 analyst escalating to Tier 3.\nKeep the entire report under 400 words.",
+          "enableStreaming": true,
+          "batching": {
+            "batchSize": 1
+          }
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3,
+      "position": [
+        384,
+        192
+      ],
+      "id": "a0e80d15-ac7f-4dc1-b5af-f92631240915",
+      "name": "AI Agent",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const output = [];\n\nfor (const item of items) {\n  const alert = item.json;\n\n  const rawTargets = alert.osint_targets || [];\n\n  // --- helper: check private/internal IPs ---\n  const isPrivateIP = (ip) => {\n    if (!ip) return true;\n\n    return (\n      ip.startsWith('10.') ||\n      ip.startsWith('192.168.') ||\n      ip.startsWith('172.16.') ||\n      ip.startsWith('172.17.') ||\n      ip.startsWith('172.18.') ||\n      ip.startsWith('172.19.') ||\n      ip.startsWith('172.2') // covers 172.20–172.29\n    );\n  };\n\n  // --- helper: validate OSINT target ---\n  const isValidTarget = (t) => {\n    if (!t || !t.value) return false;\n\n    switch (t.type) {\n      case 'ip':\n        return !isPrivateIP(t.value);\n\n      case 'domain':\n        return !t.value.includes('windowsupdate.com');\n\n      case 'url':\n        return t.value.length > 5;\n\n      case 'hash':\n        return t.value.length >= 32;\n\n      case 'command_line':\n        return false;\n\n      default:\n        return false;\n    }\n  };\n\n  // --- filter targets ---\n  const filteredTargets = rawTargets.filter(isValidTarget);\n\n  const hasOsint = filteredTargets.length > 0;\n\n  // 🔴 IMPORTANT CHANGE: emit ONE ITEM PER TARGET\n  if (hasOsint) {\n    for (const t of filteredTargets) {\n      output.push({\n        json: {\n          // 🔹 target (used by Dispatcher)\n          type: t.type,\n          value: t.value,\n\n          // 🔹 keep alert context\n          alert_id: alert.alert_id,\n          title: alert.title,\n          source: alert.source,\n          severity: alert.severity,\n          soc_priority: alert.soc_priority,\n\n          // 🔹 keep original fields if needed downstream\n          ...alert,\n\n          // 🔹 control flags (still preserved)\n          has_osint_targets: true,\n          enrichment_status: \"pending\",\n          osint_target_count: filteredTargets.length\n        }\n      });\n    }\n  } else {\n    // 🔹 preserve alerts with NO OSINT targets (important for your IF node)\n    output.push({\n      json: {\n        ...alert,\n        osint_targets_filtered: [],\n        has_osint_targets: false,\n        enrichment_status: \"skipped\",\n        osint_target_count: 0\n      }\n    });\n  }\n}\n\nreturn output;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -960,
+        48
+      ],
+      "id": "add73cbe-4b9d-42a2-9127-e1a680199e36",
+      "name": "Artefact Extraction"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://thehive:9000/api/alert/_search?range=0-27&sort=-createdAt",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\"_any\": \"*\"}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        -1632,
+        48
+      ],
+      "id": "b114eb44-0e09-4fd1-98ee-47aa75b4a6f9",
+      "name": "Get Alerts",
+      "executeOnce": true,
+      "credentials": {
+        "httpBearerAuth": {
+          "id": "QsgeguY0Q9QxMiiB",
+          "name": "TheHive Bearer"
+        },
+        "httpHeaderAuth": {
+          "id": "pQl492rL75o1EGW7",
+          "name": "TheHive Header Auth"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "2YacymO2ni8CneaM",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/2YacymO2ni8CneaM",
+          "cachedResultName": "Dispatcher"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {}
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        -512,
+        -32
+      ],
+      "id": "e5f0c81f-da40-477b-a0e9-1fd3dd29b354",
+      "name": "Call 'Dispatcher'"
+    },
+    {
+      "parameters": {
+        "jsCode": "// === OSINT Summarizer (Compact, No Bloat, No Drops) ===\n\nreturn items.map(item => {\n  const data = item.json;\n\n  // -----------------------------\n  // Normalize alert\n  // -----------------------------\n  const alert = (data.alert && Object.keys(data.alert).length > 1)\n    ? data.alert\n    : data;\n\n  const lookup = data.lookup_result || data.lookup_results || {};\n  const type = data.type || \"unknown\";\n  const value = data.value || null;\n\n  const hasLookup = Object.keys(lookup).length > 0;\n\n  // -----------------------------\n  // Helpers\n  // -----------------------------\n  const safe = (v, def = null) =>\n    v === undefined || v === null ? def : v;\n\n  // -----------------------------\n  // 🔥 TRIM LOOKUP (CRITICAL)\n  // -----------------------------\n  function trimLookup() {\n    const trimmed = {};\n\n    if (lookup.shodan) {\n      trimmed.shodan = {\n        isp: lookup.shodan.isp,\n        org: lookup.shodan.org,\n        ports: (lookup.shodan.ports || []).slice(0, 10)\n      };\n    }\n\n    if (lookup.abuseipdb) {\n      trimmed.abuseipdb = {\n        score: lookup.abuseipdb.score,\n        country: lookup.abuseipdb.country,\n        usage_type: lookup.abuseipdb.usage_type\n      };\n    }\n\n    if (lookup.virustotal?.raw?.data?.attributes) {\n      const attr = lookup.virustotal.raw.data.attributes;\n\n      trimmed.virustotal = {\n        reputation: attr.reputation,\n        malicious: safe(attr.last_analysis_stats?.malicious, 0),\n        suspicious: safe(attr.last_analysis_stats?.suspicious, 0),\n        tags: (attr.tags || []).slice(0, 5),\n        last_analysis: attr.last_analysis_date\n      };\n    }\n\n    return trimmed;\n  }\n\n  // -----------------------------\n  // IP Summary\n  // -----------------------------\n  function summarizeIP() {\n    const shodan = lookup.shodan || {};\n    const abuse = lookup.abuseipdb || {};\n\n    let classification = \"unknown\";\n\n    if ((shodan.isp || \"\").toLowerCase().includes(\"cloudflare\")) {\n      classification = \"trusted_cdn\";\n    } else if ((abuse.score || 0) > 50) {\n      classification = \"likely_malicious\";\n    } else if ((abuse.score || 0) > 0) {\n      classification = \"suspicious\";\n    }\n\n    return {\n      indicator: value,\n      type: \"ip\",\n      classification,\n      abuse_score: safe(abuse.score, 0),\n      isp: safe(shodan.isp),\n      country: safe(abuse.country),\n      confidence: hasLookup ? 1 : 0\n    };\n  }\n\n  // -----------------------------\n  // Domain Summary\n  // -----------------------------\n  function summarizeDomain() {\n    const vt = lookup.virustotal || {};\n    const attr = vt?.raw?.data?.attributes || {};\n\n    const malicious = safe(attr.last_analysis_stats?.malicious, 0);\n\n    let classification = \"unknown\";\n\n    if (malicious > 5) classification = \"malicious\";\n    else if (malicious > 0) classification = \"suspicious\";\n\n    return {\n      indicator: value,\n      type: \"domain\",\n      classification,\n      malicious,\n      reputation: safe(attr.reputation, 0),\n      confidence: vt?.raw?.data ? 1 : 0\n    };\n  }\n\n  // -----------------------------\n  // Hash Summary\n  // -----------------------------\n  function summarizeHash() {\n    const vt = lookup.virustotal || {};\n    const attr = vt?.raw?.data?.attributes || {};\n\n    const malicious = safe(attr.last_analysis_stats?.malicious, 0);\n\n    let classification = \"clean\";\n    if (malicious > 10) classification = \"malicious\";\n    else if (malicious > 0) classification = \"suspicious\";\n\n    return {\n      indicator: value,\n      type: \"hash\",\n      classification,\n      malicious,\n      file_type: attr.type_description,\n      confidence: vt?.raw?.data ? 1 : 0\n    };\n  }\n\n  // -----------------------------\n  // URL Summary (for Nmap alerts)\n  // -----------------------------\n  function summarizeURL() {\n    const u = (value || \"\").toLowerCase();\n\n    let classification = \"unknown\";\n\n    if (u.includes(\"hnap\") || u.includes(\"sdk\")) {\n      classification = \"scan_probe\";\n    } else if (u.includes(\"login\") || u.includes(\"admin\")) {\n      classification = \"sensitive_endpoint\";\n    }\n\n    return {\n      indicator: value,\n      type: \"url\",\n      classification,\n      confidence: 0.5\n    };\n  }\n\n  // -----------------------------\n  // Dispatcher\n  // -----------------------------\n  let osint_summary;\n\n  if (!hasLookup) {\n    osint_summary = {\n      indicator: value,\n      type,\n      classification: \"no_enrichment\",\n      confidence: 0\n    };\n  } else if (type === \"ip\") {\n    osint_summary = summarizeIP();\n  } else if (type === \"domain\") {\n    osint_summary = summarizeDomain();\n  } else if (type === \"hash\") {\n    osint_summary = summarizeHash();\n  } else if (type === \"url\") {\n    osint_summary = summarizeURL();\n  } else {\n    osint_summary = {\n      indicator: value,\n      type,\n      classification: \"unsupported\",\n      confidence: 0\n    };\n  }\n\n  // -----------------------------\n  // FINAL OUTPUT (CLEAN)\n  // -----------------------------\n  return {\n    json: {\n      alert_id: alert.alert_id,\n      alert,\n      type,\n      value,\n\n      osint_summary,\n      enrichment_confidence: osint_summary.confidence,\n\n      // 🔥 trimmed instead of full raw dump\n      lookup_summary: trimLookup()\n    }\n  };\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -288,
+        -32
+      ],
+      "id": "233c7d2e-cd9c-46ed-98df-79d0d3b65b8e",
+      "name": "Summarize OSINT Lookup"
+    },
+    {
+      "parameters": {
+        "jsCode": "return items.map(item => {\n  const report = item.json.output || item.json;\n  const alertTitle = item.json.alert?.title || \"Security Alert\";\n  const severity = item.json.alert?.severity || \"Unknown\";\n  \n  // Choose an emoji based on severity\n  const icon = severity >= 4 ? \"🔴\" : \"🟠\";\n\n  const message = `\n### ${icon} SOC Alert Handoff: ${alertTitle}\n---\n${report}\n\n---\n*Report generated by Qwen2.5:7b • [Open TheHive](http://172.16.218.12:9000)*\n  `.trim();\n\n  return {\n    json: {\n      text: message,\n      username: \"Qwen-SOC-Agent\",\n      icon_url: \"https://n8n.io\" // Or any robot icon URL\n    }\n  };\n});\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1408,
+        256
+      ],
+      "id": "0bbbc8ad-46f4-4430-9350-03bd39feb15a",
+      "name": "Markdown Report Converter"
+    },
+    {
+      "parameters": {
+        "model": "qwen2.5:3b",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOllama",
+      "typeVersion": 1,
+      "position": [
+        528,
+        416
+      ],
+      "id": "91694dfc-5713-4f37-a9b5-8f95bdfb336c",
+      "name": "qwen2.5:3b",
+      "credentials": {
+        "ollamaApi": {
+          "id": "tZ9YDJMiG8nUIbse",
+          "name": "Ollama account Creds"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "model": "qwen2.5-7b-gpu:latest",
+        "options": {
+          "temperature": 0.1,
+          "topP": 0.9,
+          "frequencyPenalty": 1.05,
+          "numPredict": 850,
+          "numThread": 6
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOllama",
+      "typeVersion": 1,
+      "position": [
+        400,
+        416
+      ],
+      "id": "5eb15e27-efd6-4736-8161-3b6edc6b1327",
+      "name": "qwen2.5:7b",
+      "credentials": {
+        "ollamaApi": {
+          "id": "tZ9YDJMiG8nUIbse",
+          "name": "Ollama account Creds"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "return items.map(item => {\n  const i = item.json;\n\n  const verdict = i.final_verdict;\n  const alert = i.alert || {};\n  const score = i.risk_score || 0;\n\n  let decision = {\n    action: null,\n    priority: null,\n    playbook: null,\n    reason: null\n  };\n\n  // =========================\n  // HIGH RISK → FULL RESPONSE\n  // =========================\n  if (verdict === \"HIGH\") {\n    decision.action = \"create_case\";\n\n    // Prioritize stronger attacks\n    if (score >= 90) {\n      decision.priority = \"P1\";\n    } else {\n      decision.priority = \"P2\";\n    }\n\n    // Map playbooks\n    if (alert.alert_type === \"powershell_execution\") {\n      decision.playbook = \"EDR_Containment\";\n    } \n    else if (alert.alert_type === \"web_activity\") {\n      decision.playbook = \"Web_Server_Compromise\";\n    } \n    else {\n      decision.playbook = \"Generic_Threat_Investigation\";\n    }\n\n    decision.reason = \"High risk behavior + correlation detected\";\n  }\n\n  // =========================\n  // MEDIUM → INVESTIGATE\n  // =========================\n  else if (verdict === \"MEDIUM\") {\n    decision.action = \"create_alert\";\n\n    decision.priority = \"P3\";\n    decision.playbook = \"Threat_Hunting\";\n\n    decision.reason = \"Suspicious behavior requires investigation\";\n  }\n\n  // =========================\n  // LOW → SUPPRESS / LOG\n  // =========================\n  else {\n    if (alert.alert_type === \"benign_update_activity\") {\n      decision.action = \"auto_close\";\n      decision.reason = \"Known benign update traffic\";\n    } else {\n      decision.action = \"log_only\";\n      decision.reason = \"Low risk signal\";\n    }\n\n    decision.priority = \"P5\";\n    decision.playbook = \"None\";\n  }\n\n  // Attach decision\n  i.decision = decision;\n\n  return { json: i };\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        960,
+        -240
+      ],
+      "id": "d8c019d9-541f-4658-9e90-9ae65a8a7ef4",
+      "name": "Decision Engine"
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.decision.action }}",
+                    "rightValue": "create_case",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "2e1a1f4f-92a0-4f7b-82a7-e44061cafd8a"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "HIGH"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "1f4df408-9562-40b8-9fa6-c78ba55f36ec",
+                    "leftValue": "={{ $json.decision.action }}",
+                    "rightValue": "create_alert",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "MEDIUM"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "5cd24567-b95c-4081-9779-9501d728cbfb",
+                    "leftValue": "={{ $json.decision.action }}",
+                    "rightValue": "=auto_close|log_only",
+                    "operator": {
+                      "type": "string",
+                      "operation": "regex"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "LOW"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.3,
+      "position": [
+        1184,
+        -256
+      ],
+      "id": "a30d5afb-54e4-4c05-b2ec-a3825bb5db45",
+      "name": "Switch"
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineByPosition",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        736,
+        -48
+      ],
+      "id": "3fd946a8-0015-4827-be5b-58dbf9eb7a77",
+      "name": "Merge"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://thehive:9000/api/case",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{\nJSON.stringify({\n  \"title\": $json.alert.title,\n  \"description\": `${$json.alert.summary_for_ai}\\n\\n---\\nAI TRIAGE:\\n${$json.output}\\n\\n---\\nREASON:\\n${$json.decision.reason}`,\n  \"severity\": $json.alert.severity,\n  \"startDate\": $json.alert.date,\n  \"tlp\": 2,\n  \"pap\": 2,\n  \"flag\": false,\n  \"tags\": [\n    \"auto-generated\",\n    \"n8n\",\n    $json.alert.source,\n    $json.decision.playbook\n  ],\n  \"customFields\": {\n    \"sourceRef\": {\n      \"string\": $json.alert.alert_id\n    },\n    \"riskScore\": {\n      \"number\": $json.risk_score\n    },\n    \"finalVerdict\": {\n      \"string\": $json.final_verdict\n    },\n    \"playbook\": {\n      \"string\": $json.decision.playbook\n    }\n  }\n})\n}}\n",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        1408,
+        -928
+      ],
+      "id": "0a12eac4-bc4c-47c8-9724-31d4f2398257",
+      "name": "Create Case",
+      "retryOnFail": true,
+      "maxTries": 5,
+      "executeOnce": false,
+      "credentials": {
+        "httpBearerAuth": {
+          "id": "QsgeguY0Q9QxMiiB",
+          "name": "TheHive Bearer"
+        },
+        "httpHeaderAuth": {
+          "id": "pQl492rL75o1EGW7",
+          "name": "TheHive Header Auth"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=http://thehive:9000/api/case/{{ $json._id }}/artifact",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"dataType\": \"{{ $node[\"Switch\"].json.type }}\",\n  \"data\": \"{{ $node[\"Switch\"].json.value }}\",\n  \"message\": \"{{ 'Extracted from alert: ' + $node[\"Switch\"].json.alert.title }}\",\n  \"tlp\": 2,\n  \"pap\": 2,\n  \"ioc\": true,\n  \"tags\": [\n    \"auto-added\",\n    \"{{ $node[\"Switch\"].json.alert.source }}\"\n  ]\n}\n",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        1632,
+        -928
+      ],
+      "id": "41301ac4-d749-4062-b744-497f7ca81084",
+      "name": "Add Observables",
+      "retryOnFail": true,
+      "maxTries": 5,
+      "executeOnce": false,
+      "credentials": {
+        "httpBearerAuth": {
+          "id": "QsgeguY0Q9QxMiiB",
+          "name": "TheHive Bearer"
+        },
+        "httpHeaderAuth": {
+          "id": "pQl492rL75o1EGW7",
+          "name": "TheHive Header Auth"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://thehive:9000/api/case",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{\nJSON.stringify({\n  \"title\": $json.alert.title,\n  \"description\": `${$json.alert.summary_for_ai}\\n\\n---\\nAI TRIAGE:\\n${$json.output}\\n\\n---\\nREASON:\\n${$json.decision.reason}`,\n  \"severity\": $json.alert.severity,\n  \"startDate\": $json.alert.date,\n  \"tlp\": 2,\n  \"pap\": 2,\n  \"flag\": false,\n  \"tags\": [\n    \"auto-generated\",\n    \"n8n\",\n    $json.alert.source,\n    $json.decision.playbook\n  ],\n  \"customFields\": {\n    \"sourceRef\": {\n      \"string\": $json.alert.alert_id\n    },\n    \"riskScore\": {\n      \"number\": $json.risk_score\n    },\n    \"finalVerdict\": {\n      \"string\": $json.final_verdict\n    },\n    \"playbook\": {\n      \"string\": $json.decision.playbook\n    }\n  }\n})\n}}\n",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        1408,
+        -144
+      ],
+      "id": "b26e5226-3fdb-496e-bc13-45a3a35a5d76",
+      "name": "Create Case1",
+      "retryOnFail": true,
+      "maxTries": 5,
+      "executeOnce": false,
+      "credentials": {
+        "httpBearerAuth": {
+          "id": "QsgeguY0Q9QxMiiB",
+          "name": "TheHive Bearer"
+        },
+        "httpHeaderAuth": {
+          "id": "pQl492rL75o1EGW7",
+          "name": "TheHive Header Auth"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=http://thehive:9000/api/case/{{ $json._id }}/artifact",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"dataType\": \"{{ $node[\"Switch\"].json.type }}\",\n  \"data\": \"{{ $node[\"Switch\"].json.value }}\",\n  \"message\": \"{{ 'Extracted from alert: ' + $node[\"Switch\"].json.alert.title }}\",\n  \"tlp\": 2,\n  \"pap\": 2,\n  \"ioc\": true,\n  \"tags\": [\n    \"auto-added\",\n    \"{{ $node[\"Switch\"].json.alert.source }}\"\n  ]\n}\n",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        1632,
+        -144
+      ],
+      "id": "0a1bfe78-0c91-4075-88e5-ca3829537021",
+      "name": "Add Observables1",
+      "retryOnFail": true,
+      "maxTries": 5,
+      "executeOnce": false,
+      "credentials": {
+        "httpBearerAuth": {
+          "id": "QsgeguY0Q9QxMiiB",
+          "name": "TheHive Bearer"
+        },
+        "httpHeaderAuth": {
+          "id": "pQl492rL75o1EGW7",
+          "name": "TheHive Header Auth"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://192.168.1.254/api/firewall/alias_util/add/BLOCKED_IPS",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"address\": \"{{$json.value}}\"\n}",
+        "options": {
+          "allowUnauthorizedCerts": true
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        1856,
+        -544
+      ],
+      "id": "18f3211e-aac2-4f44-8752-eb8b010c8452",
+      "name": "Block IP",
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "hzJ7wnP0mKwzWTnW",
+          "name": "OPNsense Credentials"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://192.168.1.254/api/firewall/alias/reconfigure",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "options": {
+          "allowUnauthorizedCerts": true
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        2080,
+        -544
+      ],
+      "id": "cd441896-6403-42f3-bcda-7288c77f3b34",
+      "name": "Apply Changes",
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "hzJ7wnP0mKwzWTnW",
+          "name": "OPNsense Credentials"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.has_osint_targets }}",
+                    "rightValue": "",
+                    "operator": {
+                      "type": "boolean",
+                      "operation": "true",
+                      "singleValue": true
+                    },
+                    "id": "3116dbdd-51e2-40dc-b8ab-8f1e15c8b42f"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "OSINT"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "4f8aa53a-c0dc-45b9-a8cd-af75301b7f2c",
+                    "leftValue": "={{ $json.has_osint_targets }}",
+                    "rightValue": "",
+                    "operator": {
+                      "type": "boolean",
+                      "operation": "false",
+                      "singleValue": true
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Bypass"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.3,
+      "position": [
+        -736,
+        48
+      ],
+      "id": "6ed12743-1017-4c0b-b6e9-0cec7fefb311",
+      "name": "has_osint_targets"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        -64,
+        48
+      ],
+      "id": "15bf5c63-131b-4d75-bb7a-c570ac69ce51",
+      "name": "Merge Alerts"
+    },
+    {
+      "parameters": {
+        "jsCode": "// === CONFIG ===\nconst TRUSTED_DOMAINS = [\n  \"windowsupdate.com\",\n  \"microsoft.com\",\n  \"azureedge.net\"\n];\n\n// === HELPERS ===\nfunction isTrustedDomain(domain) {\n  if (!domain) return false;\n  return TRUSTED_DOMAINS.some(d => domain.includes(d));\n}\n\nfunction isWindowsUpdate(alert) {\n  return (\n    alert.user_agent?.includes(\"Microsoft-Delivery-Optimization\") ||\n    alert.urls?.some(u => u.includes(\"msdownload\")) ||\n    isTrustedDomain(alert.domain)\n  );\n}\n\nfunction buildFullUrls(alert) {\n  if (!alert.urls) return [];\n  if (!alert.domain) return alert.urls;\n\n  return alert.urls.map(u => {\n    if (u.startsWith(\"http\")) return u;\n    return `http://${alert.domain}${u}`;\n  });\n}\n\n// === GROUPING ===\nfunction getGroupingKey(item) {\n  const alert = item.alert || {};\n  \n  // 1. Use domain if present (Windows Update etc.)\n  if (alert.domain) {\n    return `domain:${alert.domain}`;\n  }\n  \n  // 2. Use type:value for IP / hash / domain alerts\n  if (item.type && item.value) {\n    return `${item.type}:${item.value}`;\n  }\n  \n  // 3. Fallback: use alert_id so every generic alert is its own group\n  return `alert_id:${item.alert_id || item.alert?.alert_id || Math.random()}`;\n}\n\n// === SCORING ===\nfunction scoreItem(item) {\n  let score = 0;\n\n  const alert = item.alert && Object.keys(item.alert).length > 1\n  ? item.alert\n  : item;\n  const osint = item.osint_summary || {};\n\n  const title = (alert.title || \"\").toLowerCase();\n  const flow = (alert.asset_flow || \"\").toLowerCase();\n  const role = (alert.src_role || \"\").toLowerCase();\n\n  const hasOSINT = item.has_osint_targets;\n\n  // =========================\n  // 1. OSINT\n  // =========================\n  if (osint.detection?.malicious > 10) score += 30;\n  else if (osint.detection?.malicious > 0) score += 15;\n\n  if (osint.reputation?.abuse_score > 50) score += 15;\n\n  // =========================\n  // 2. BEHAVIOR (REDUCED + CONTROLLED)\n  // =========================\n\n  // Critical attacks\n  if (title.includes(\"kerberoast\") || flow.includes(\"credential access\")) {\n    score += 60;\n  }\n\n  // Persistence / Priv Esc\n  else if (title.includes(\"admin account creation\") || flow.includes(\"persistence\")) {\n    score += 50;\n  }\n\n  // Discovery\n  else if (title.includes(\"discovery\") || flow.includes(\"discovery\")) {\n    score += 30;\n  }\n\n  // =========================\n  // 3. CONTEXT (NO DUPLICATION)\n  // =========================\n  if (role.includes(\"domain controller\")) {\n    score += 25;\n  } else if (role.includes(\"server\")) {\n    score += 15;\n  }\n\n  // Severity\n  if (alert.severity >= 5) score += 25;\n  else if (alert.severity === 4) score += 15;\n\n  // SOC priority (reduced weight)\n  score += (alert.soc_priority || 1) * 5;\n\n  // =========================\n  // 4. NO OSINT (FLAT BONUS, NO MULTIPLIER)\n  // =========================\n  if (!hasOSINT) {\n    score += 10;\n  }\n\n  // =========================\n  // 5. SIGNALS\n  // =========================\n  if (alert.command_lines?.some(cmd =>\n    cmd.toLowerCase().includes(\"executionpolicy bypass\")\n  )) score += 20;\n\n  if (alert.process_names?.some(p =>\n    p.toLowerCase().includes(\"printspoofer\")\n  )) score += 40;\n\n  if (alert.process_names?.some(p =>\n    p.toLowerCase().includes(\"sandcat\")\n  )) score += 35;\n\n  if (alert.command_lines?.some(cmd =>\n    cmd.includes(\":8888\")\n  )) score += 25;\n\n  // =========================\n  // 6. CORRELATION\n  // =========================\n  if (item.occurrences > 2) score += 10;\n  if (item.related_alerts?.length > 2) score += 10;\n\n  // =========================\n  // 7. BENIGN OVERRIDE (KEEP)\n  // =========================\n  if (isWindowsUpdate(alert)) {\n    score = Math.min(score, 20);\n  }\n\n  return Math.max(0, Math.min(100, Math.round(score)));\n}\n\nfunction verdictFromScore(score) {\n  if (score >= 70) return \"HIGH\";\n  if (score >= 40) return \"MEDIUM\";\n  return \"LOW\";\n}\n\n// === MAIN ===\n\n// 1. Normalize\nconst normalized = items.map(item => {\n  const i = item.json;\n\n  i.alert = i.alert || {};\n  i.osint_summary = i.osint_summary || {};\n\n  i.alert.urls = buildFullUrls(i.alert);\n\n  if (isWindowsUpdate(i.alert)) {\n    i.alert.alert_type = \"benign_update_activity\";\n    i.alert.playbook = \"ignore_or_whitelist\";\n  }\n\n  if (i.type === \"ip\" && isTrustedDomain(i.alert.domain)) {\n    i.osint_summary.classification = \"trusted_vendor\";\n  }\n\n  return i;\n});\n\n// 2. Group\nconst grouped = {};\n\nfor (const item of normalized) {\n  const key = getGroupingKey(item);\n\n  if (!grouped[key]) {\n    grouped[key] = {\n      ...item,\n      occurrences: 1,\n      related_alerts: [item.alert.alert_id]\n    };\n  } else {\n    grouped[key].occurrences++;\n    grouped[key].related_alerts.push(item.alert.alert_id);\n  }\n}\n\n// 3. Score\nfor (const key in grouped) {\n  const item = grouped[key];\n\n  const score = scoreItem(item);\n  item.risk_score = score;\n  item.final_verdict = verdictFromScore(score);\n}\n\n// 4. Noise suppression\n// === NOISE SUPPRESSION (improved) ===\nconst NOISE_SUPPRESSION_THRESHOLD = 1;        // ← you can change this\nconst MIN_SOC_PRIORITY_TO_KEEP = 3;       // keep everything >=4 even if LOW\n\n// === FINAL FILTER ===\nconst result = Object.values(grouped).filter(i => {\n  const verdict = i.final_verdict;\n  const occurrences = i.occurrences || 1;\n  const socPriority = i.alert?.soc_priority || i.soc_priority || 4;\n\n  // Keep HIGH and MEDIUM no matter what\n  if (verdict === \"HIGH\" || verdict === \"MEDIUM\") {\n    return true;\n  }\n\n  // NEVER drop high-priority alerts (Kerberoasting = 5, local admin = 4, etc.)\n  if (socPriority >= MIN_SOC_PRIORITY_TO_KEEP) {\n    return true;\n  }\n\n  // Only suppress true noise: LOW risk + very rare\n  return !(verdict === \"LOW\" && occurrences <= NOISE_SUPPRESSION_THRESHOLD);\n});\n\n// 5. Output\nreturn result.map(i => ({ json: i }));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        160,
+        48
+      ],
+      "id": "6eb03599-fcde-4981-ad59-36b64acf01d7",
+      "name": "Post-Enrichment + Risk Engine"
+    },
+    {
+      "parameters": {
+        "jsCode": "const globalSet = new Set();\nconst results = [];\n\n// ---- VALIDATORS ----\n\nfunction isValidHash(h) {\n  return /^[a-fA-F0-9]{32}$|^[a-fA-F0-9]{40}$|^[a-fA-F0-9]{64}$/.test(h);\n}\n\nfunction isValidIP(ip) {\n  if (!ip) return false;\n  const parts = ip.split('.');\n  return parts.length === 4 && parts.every(p => {\n    const n = Number(p);\n    return n >= 0 && n <= 255;\n  });\n}\n\nfunction isLikelyDomain(d) {\n  if (!d) return false;\n\n  const lower = d.toLowerCase();\n\n  // ❌ Reject filenames / code artifacts\n  if (\n    lower.endsWith('.exe') ||\n    lower.endsWith('.dll') ||\n    lower.endsWith('.ps1') ||\n    lower.endsWith('.bat') ||\n    lower.endsWith('.go') ||\n    lower.includes('system.') ||\n    lower.includes('wc.') ||\n    lower.includes('headers')\n  ) return false;\n\n  // Must have at least one dot\n  if (!d.includes('.')) return false;\n\n  // Basic domain pattern\n  return /^[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$/.test(d);\n}\n\nfunction extractIPs(text) {\n  if (!text) return [];\n  return text.match(/\\b(?:\\d{1,3}\\.){3}\\d{1,3}\\b/g) || [];\n}\n\nfunction extractDomains(text) {\n  if (!text) return [];\n  return text.match(/\\b[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}\\b/g) || [];\n}\n\n// ---- PROCESS ----\n\nfor (const item of items) {\n  const alert = item.json.alert || item.json;\n  const alert_id = item.json.alert_id;\n\n  const add = (type, value) => {\n    const key = `${type}:${value}`;\n    if (!globalSet.has(key)) {\n      globalSet.add(key);\n      results.push({\n        json: {\n          alert_id,\n          type,\n          value\n        }\n      });\n    }\n  };\n\n  // ---- HASHES ----\n  (alert.hashes || []).forEach(h => {\n    if (isValidHash(h)) add(\"hash\", h);\n  });\n\n  // ---- IPs ----\n  [alert.src_ip, alert.dst_ip].forEach(ip => {\n    if (isValidIP(ip)) add(\"ip\", ip);\n  });\n\n  // ---- DOMAIN FIELD ----\n  if (isLikelyDomain(alert.domain)) {\n    add(\"domain\", alert.domain);\n  }\n\n  // ---- COMMAND LINES ----\n  (alert.command_lines || []).forEach(cmd => {\n    extractIPs(cmd).forEach(ip => {\n      if (isValidIP(ip)) add(\"ip\", ip);\n    });\n\n    extractDomains(cmd).forEach(d => {\n      if (isLikelyDomain(d)) add(\"domain\", d);\n    });\n  });\n\n  // ---- URLS ----\n  (alert.urls || []).forEach(url => {\n    extractIPs(url).forEach(ip => {\n      if (isValidIP(ip)) add(\"ip\", ip);\n    });\n\n    extractDomains(url).forEach(d => {\n      if (isLikelyDomain(d)) add(\"domain\", d);\n    });\n  });\n}\n\nreturn results;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1408,
+        -544
+      ],
+      "id": "078ec5fa-7b8c-48b0-8c50-df679bfed57c",
+      "name": "IOC Extractor"
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.type }}",
+                    "rightValue": "hash",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "13645a97-c8ca-420c-9d6f-af1348d475ab"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "HASH"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "01605265-429e-424b-9db3-142c825c7108",
+                    "leftValue": "={{ $json.type }}",
+                    "rightValue": "ip",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "IP"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "57829cda-a1d1-42b3-bac7-cac0f483abd5",
+                    "leftValue": "={{ $json.type }}",
+                    "rightValue": "domain",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "DOMAIN"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.3,
+      "position": [
+        1632,
+        -560
+      ],
+      "id": "6b34d141-771b-4706-8386-d41e6c2b8eb8",
+      "name": "IOC Response Router"
+    },
+    {
+      "parameters": {
+        "dataTableId": {
+          "__rl": true,
+          "value": "v7ctNSXYI1WiBdkZ",
+          "mode": "list",
+          "cachedResultName": "malicious_domains",
+          "cachedResultUrl": "/projects/iepneOJcbZRD9xW1/datatables/v7ctNSXYI1WiBdkZ"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "domain": "={{ $json.value }}"
+          },
+          "matchingColumns": [
+            "domain"
+          ],
+          "schema": [
+            {
+              "id": "domain",
+              "displayName": "domain",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1,
+      "position": [
+        1856,
+        -160
+      ],
+      "id": "1608c2dc-3a60-42a4-b7d3-04f052af83f9",
+      "name": "Insert into \"malicious_domains\" data table"
+    },
+    {
+      "parameters": {
+        "command": "=python3 hh_final.py {{ $json.value }} sha256 \"C:/Users/**,C:/inetpub/wwwroot/mutillidae/**,C:/Windows/system32/**\"",
+        "cwd": "//home/ubuntu/velociraptor_setup"
+      },
+      "type": "n8n-nodes-base.ssh",
+      "typeVersion": 1,
+      "position": [
+        2080,
+        -736
+      ],
+      "id": "2f97636a-8535-40d3-883f-3aa3dbdf0483",
+      "name": "hash hunt",
+      "credentials": {
+        "sshPassword": {
+          "id": "tgUUYwV4d6owzChg",
+          "name": "velociraptor"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Whitelisted (legit) paths / patterns\nconst WHITELIST_PATTERNS = [\n  /\\\\Windows\\\\System32\\\\WindowsPowerShell\\\\v1\\.0\\\\powershell\\.exe$/i,\n  /\\\\Windows\\\\System32\\\\cmd\\.exe$/i,\n  /\\\\Windows\\\\System32\\\\svchost\\.exe$/i,\n  /\\\\Windows\\\\System32\\\\lsass\\.exe$/i,\n  /\\\\Windows\\\\System32\\\\services\\.exe$/i,\n  /\\\\Windows\\\\explorer\\.exe$/i,\n  /\\\\Program Files\\\\/i,\n  /\\\\Program Files \\(x86\\)\\\\/i\n];\n\n// helper → check if path is safe\nfunction isWhitelisted(path) {\n  return WHITELIST_PATTERNS.some(pattern => pattern.test(path));\n}\n\nconst results = [];\n\nfor (const item of items) {\n  try {\n    const parsed = JSON.parse(item.json.stdout);\n\n    // skip if no results\n    if (!parsed.results || parsed.results.length === 0) continue;\n\n    for (const entry of parsed.results) {\n      const filePath = entry.path;\n\n      if (!filePath) continue;\n\n      // ❌ skip legit files\n      if (isWhitelisted(filePath)) continue;\n\n      // ✅ keep only suspicious files\n      results.push({\n        json: {\n          client_id: entry.client_id,\n          hostname: entry.hostname,\n          path: filePath,\n          sha256: entry.sha256\n        }\n      });\n    }\n\n  } catch (err) {\n    // ignore malformed stdout safely\n    continue;\n  }\n}\n\n// return only suspicious findings\nreturn results;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2080,
+        -928
+      ],
+      "id": "844f000d-36e8-4706-a7ee-99cc0a2eb8e7",
+      "name": "Parse the Results"
+    },
+    {
+      "parameters": {
+        "command": "=./delete_wrapper.sh \"{{ $json.path }}\"",
+        "cwd": "//home/ubuntu/velociraptor_setup"
+      },
+      "type": "n8n-nodes-base.ssh",
+      "typeVersion": 1,
+      "position": [
+        2304,
+        -928
+      ],
+      "id": "bf1275bd-313b-460f-998d-4504cbbebf95",
+      "name": "delete_file",
+      "credentials": {
+        "sshPassword": {
+          "id": "tgUUYwV4d6owzChg",
+          "name": "velociraptor"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        1856,
+        -784
+      ],
+      "id": "84e22cce-f215-42fc-bf23-56c82a85d432",
+      "name": "Loop Over Items"
+    },
+    {
+      "parameters": {
+        "command": "=python3 quarantine-win.py {{ $json.client_id }}",
+        "cwd": "//home/ubuntu/velociraptor_setup"
+      },
+      "type": "n8n-nodes-base.ssh",
+      "typeVersion": 1,
+      "position": [
+        1632,
+        -1120
+      ],
+      "id": "da3aeec4-6be3-4a2f-a492-23e03bd5cd23",
+      "name": "isolate_host",
+      "credentials": {
+        "sshPassword": {
+          "id": "tgUUYwV4d6owzChg",
+          "name": "velociraptor"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const mapping = {\n  webserver: \"C.33aec7bb21619463\",\n  pdc: \"C.669de98b6f0d50d2\",\n};\n\nconst seen = new Set();\n\nconst result = items\n  .map((item) => {\n    const data = item.json;\n\n    const hostname =\n      data.alert?.src_asset?.toLowerCase() ||\n      data.src_asset?.toLowerCase();\n\n    const client_id = mapping[hostname];\n\n    if (!client_id) return null;\n\n    return { hostname, client_id };\n  })\n  .filter(Boolean)\n  .filter((item) => {\n    if (seen.has(item.client_id)) return false;\n    seen.add(item.client_id);\n    return true;\n  })\n  .map((item) => ({ json: item }));\n\nreturn result;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1408,
+        -1120
+      ],
+      "id": "65d8708f-aabe-4df3-91a9-9faea9d26bb4",
+      "name": "Hostname to Client_id Mapper (Isolate Host)"
+    },
+    {
+      "parameters": {
+        "jsCode": "return items.map(item => {\n  const report = item.json.output || item.json;\n  const alertTitle = item.json.alert?.title || \"Security Alert\";\n  const severity = item.json.alert?.severity || \"Unknown\";\n  \n  // Choose an emoji based on severity\n  const icon = severity >= 4 ? \"🔴\" : \"🟠\";\n\n  const message = `\n### ${icon} SOC Alert Handoff: ${alertTitle}\n---\n${report}\n\n---\n*Report generated by Qwen2.5:7b • [Open TheHive](http://172.16.218.12:9000)*\n  `.trim();\n\n  return {\n    json: {\n      text: message,\n      username: \"Qwen-SOC-Agent\",\n      icon_url: \"https://n8n.io\" // Or any robot icon URL\n    }\n  };\n});\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1408,
+        64
+      ],
+      "id": "151fcec3-06ad-48f0-8f23-b5143489b300",
+      "name": "Markdown Report Converter1"
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "=http://thehive:9000/api/alert/{{ $json.alert_id }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"tags\": [\"ai-agent-processed\"]\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        960,
+        48
+      ],
+      "id": "8fc9ab41-76c6-4de1-be81-744e14fbb47c",
+      "name": "Update Alerts",
+      "executeOnce": false,
+      "credentials": {
+        "httpBearerAuth": {
+          "id": "QsgeguY0Q9QxMiiB",
+          "name": "TheHive Bearer"
+        },
+        "httpHeaderAuth": {
+          "id": "pQl492rL75o1EGW7",
+          "name": "TheHive Header Auth"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "d0596f1e-0624-4d41-8994-ad342ff158cc",
+              "leftValue": "={{ $json.tags }}",
+              "rightValue": "=ai-agent-processed",
+              "operator": {
+                "type": "array",
+                "operation": "notContains",
+                "rightType": "any"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -1408,
+        48
+      ],
+      "id": "3b289bfc-8606-4939-8333-7a4c95715e04",
+      "name": "If (Deduplicate)",
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "jsCode": "return items.map(item => {\n  const text = item.json.output;\n\n  return {\n    json: {\n      src_ip: text.match(/Source IP:\\s*([0-9.]+)/)?.[1] || null,\n      dst_ip: text.match(/Destination IP:\\s*([0-9.]+)/)?.[1] || null,\n      url: text.match(/URL accessed:\\s*(.*)/)?.[1] || null,\n      ports: text.match(/Ports used:\\s*(.*)/)?.[1] || null,\n      risk: text.includes(\"Low risk\") ? \"low\" :\n            text.includes(\"Medium risk\") ? \"medium\" : \"unknown\",\n      full_report: text.replace(/\\n/g, \" \").trim(),\n      created_at: new Date().toISOString()\n    }\n  };\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        736,
+        240
+      ],
+      "id": "4018fb06-9085-4e18-8531-2800204837ee",
+      "name": "norm-db"
+    },
+    {
+      "parameters": {
+        "operation": "insert",
+        "collection": "n8n_chat_histories",
+        "fields": "={{ Object.keys($json).join(',') }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.mongoDb",
+      "typeVersion": 1.2,
+      "position": [
+        960,
+        240
+      ],
+      "id": "13d71792-ffb8-4da5-8a62-7b2b2af8a106",
+      "name": "Insert alerts",
+      "credentials": {
+        "mongoDb": {
+          "id": "RlYQphxPGcYJDUkK",
+          "name": "MongoDB account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "return items.map(item => {\n  const stdout = item.json.stdout || \"\";\n\n  // ---- Extract client_id ----\n  const clientMatch = stdout.match(/client\\s+(C\\.[a-f0-9]+)/i);\n  const client_id = clientMatch ? clientMatch[1] : \"Unknown\";\n\n  // ---- Extract flow_id ----\n  const flowMatch = stdout.match(/\"flow_id':\\s*'([^']+)'/);\n  const flow_id = flowMatch ? flowMatch[1] : \"Unknown\";\n\n  // ---- Extract timestamp ----\n  const timeMatch = stdout.match(/^(Thu.*?\\d{4})/m);\n  const timestamp = timeMatch ? timeMatch[1] : new Date().toISOString();\n\n  // ---- Extract quarantine settings ----\n  const policyMatch = stdout.match(/'PolicyName',\\s*'value':\\s*'([^']+)'/);\n  const messageMatch = stdout.match(/'MessageBox',\\s*'value':\\s*'([^']+)'/);\n\n  const policy = policyMatch ? policyMatch[1] : \"Unknown\";\n  const messageBox = messageMatch ? messageMatch[1] : \"N/A\";\n\n  // ---- Client ID → Hostname mapping ----\n  const mapping = {\n    webserver: \"C.33aec7bb21619463\",\n    pdc: \"C.669de98b6f0d50d2\",\n  };\n\n  let hostname = \"Unknown Host\";\n  for (const [host, id] of Object.entries(mapping)) {\n    if (id === client_id) {\n      hostname = host;\n      break;\n    }\n  }\n\n  // ---- Markdown Message ----\n  const markdown = `\n### 🔴 Host Isolation Executed\n---\n**Hostname:** \\`${hostname}\\`  \n**Client ID:** \\`${client_id}\\`  \n**Flow ID:** \\`${flow_id}\\`  \n\n**Action:** Quarantine Applied  \n**Policy:** \\`${policy}\\`  \n**Message to User:** \"${messageBox}\"  \n\n**Timestamp:** ${timestamp}\n\n---\n*Automated Response via Velociraptor*\n  `.trim();\n\n  return {\n    json: {\n      text: markdown,\n      username: \"SOC-Automation\",\n      icon_url: \"https://n8n.io\"\n    }\n  };\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1856,
+        -1120
+      ],
+      "id": "0b8da750-a832-47f9-a8c9-c5a9c0f32c1c",
+      "name": "Markdown Report Converter2"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://mattermost:8065/hooks/j7ga1f9jopnd5bgdsndtk5g6zc",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "text",
+              "value": "={{ $json.text }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        2080,
+        -1120
+      ],
+      "id": "cfaa6772-d2de-471c-baa2-2421eedf942a",
+      "name": "Mattermost Send Message2"
+    },
+    {
+      "parameters": {
+        "jsCode": "return items.map(item => {\n  const data = item.json;\n\n  const ip = data.value || \"Unknown\";\n  const alertId = data.alert_id || \"N/A\";\n  const type = data.type || \"ip\";\n\n  // Timestamp (execution time)\n  const timestamp = new Date().toISOString();\n\n  // Markdown message\n  const markdown = `\n### 🔴 Malicious/Suspicious IP Blocked\n---\n**IP Address:** \\`${ip}\\`  \n**Type:** ${type}  \n**Alert ID:** \\`${alertId}\\`  \n\n**Action:** Firewall Block Applied  \n\n**Timestamp:** ${timestamp}\n\n---\n*Automated Response via SOC Pipeline*\n  `.trim();\n\n  return {\n    json: {\n      text: markdown,\n      username: \"SOC-Automation\",\n      icon_url: \"https://n8n.io\"\n    }\n  };\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1856,
+        -352
+      ],
+      "id": "23938e76-a359-49e8-8314-fcc7342e4e9b",
+      "name": "Markdown Report Converter3"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://mattermost:8065/hooks/wcctucrsgj8wfeadpiymzicqde",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "text",
+              "value": "={{ $json.text }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        2080,
+        -352
+      ],
+      "id": "e073d37b-ecee-451c-b302-ebc1d624357d",
+      "name": "Mattermost Send Message3"
+    },
+    {
+      "parameters": {
+        "jsCode": "const mapping = {\n  webserver: \"C.33aec7bb21619463\",\n  pdc: \"C.669de98b6f0d50d2\",\n};\n\n// Collect all deletion results\nlet results = [];\n\nitems.forEach(item => {\n  try {\n    const parsed = JSON.parse(item.json.stdout || \"{}\");\n\n    if (parsed.results && Array.isArray(parsed.results)) {\n      parsed.results.forEach(r => {\n        // Map client_id → hostname\n        let hostname = \"Unknown Host\";\n        for (const [host, id] of Object.entries(mapping)) {\n          if (id === r.client_id) {\n            hostname = host;\n            break;\n          }\n        }\n\n        results.push({\n          hostname,\n          client_id: r.client_id,\n          path: r.path,\n          status: r.status\n        });\n      });\n    }\n  } catch (e) {\n    // ignore bad JSON safely\n  }\n});\n\n// Timestamp\nconst timestamp = new Date().toISOString();\n\n// Build clean markdown list\nconst fileList = results.map(r => {\n  return `- **Host:** \\`${r.hostname}\\`  \n  **Path:** \\`${r.path}\\`  \n  **Status:** ${r.status}`;\n}).join(\"\\n\\n\");\n\n// Final message\nconst markdown = `\n### 🔴 Malicious File Deletion Executed\n---\n${fileList}\n\n---\n**Total Files Removed:** ${results.length}  \n**Timestamp:** ${timestamp}\n\n---\n*Automated Remediation via Velociraptor*\n`.trim();\n\nreturn [\n  {\n    json: {\n      text: markdown,\n      username: \"SOC-Automation\",\n      icon_url: \"https://n8n.io\"\n    }\n  }\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2528,
+        -928
+      ],
+      "id": "7fad5e6c-191c-4a56-b6cd-1e37982d4067",
+      "name": "Markdown Report Converter4"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://mattermost:8065/hooks/jaa65c1ygpdhjcowchgcgao9ta",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "text",
+              "value": "={{ $json.text }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        2752,
+        -928
+      ],
+      "id": "957dd552-9597-4e01-b478-f587d5648b54",
+      "name": "Mattermost Send Message4"
+    },
+    {
+      "parameters": {
+        "jsCode": "return items.map(item => {\n  const report = item.json.output || item.json;\n  const alertTitle = item.json.alert?.title || \"Security Alert\";\n  const severity = item.json.alert?.severity || \"Unknown\";\n  \n  // Choose an emoji based on severity\n  const icon = severity >= 4 ? \"🔴\" : \"🟠\";\n\n  const message = `\n### ${icon} SOC Alert Handoff: ${alertTitle}\n---\n${report}\n\n---\n*Report generated by Qwen2.5:7b • [Open TheHive](http://172.16.218.12:9000)*\n  `.trim();\n\n  return {\n    json: {\n      text: message,\n      username: \"Qwen-SOC-Agent\",\n      icon_url: \"https://n8n.io\" // Or any robot icon URL\n    }\n  };\n});\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1408,
+        -336
+      ],
+      "id": "1cf0e44e-05d8-436e-84c3-318a8483638b",
+      "name": "Markdown Report Converter5"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://mattermost:8065/hooks/qh4n5ywz6jbbixb7dsyio7bgmo",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "text",
+              "value": "={{ $json.text }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        1632,
+        -336
+      ],
+      "id": "c0bf13d6-4162-4d2a-84fa-1f9ea85726bc",
+      "name": "SendMessage HIGH"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://mattermost:8065/hooks/chs1kmcawjnpjcq477hg5177ta",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "text",
+              "value": "={{ $json.text }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        1632,
+        64
+      ],
+      "id": "aa6ca4ca-3415-4a75-892a-e410531503ee",
+      "name": "SendMessage MEDIUM"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://mattermost:8065/hooks/8h77hygb8byudgzmn8hnxgzfwe",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "text",
+              "value": "={{ $json.text }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        1632,
+        256
+      ],
+      "id": "de68d1ef-1ef7-41d6-a100-d9a3b42e3a3d",
+      "name": "SendMessage LOW"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "When Executed by Main Workflow": {
+      "main": [
+        [
+          {
+            "node": "Get Alerts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Alerts": {
+      "main": [
+        [
+          {
+            "node": "Artefact Extraction",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Alerts": {
+      "main": [
+        [
+          {
+            "node": "If (Deduplicate)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Artefact Extraction": {
+      "main": [
+        [
+          {
+            "node": "has_osint_targets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call 'Dispatcher'": {
+      "main": [
+        [
+          {
+            "node": "Summarize OSINT Lookup",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Summarize OSINT Lookup": {
+      "main": [
+        [
+          {
+            "node": "Merge Alerts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Agent": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 1
+          },
+          {
+            "node": "norm-db",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Markdown Report Converter": {
+      "main": [
+        [
+          {
+            "node": "SendMessage LOW",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "qwen2.5:3b": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_languageModel",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "qwen2.5:7b": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Decision Engine": {
+      "main": [
+        [
+          {
+            "node": "Switch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Switch": {
+      "main": [
+        [
+          {
+            "node": "Create Case",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "IOC Extractor",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Hostname to Client_id Mapper (Isolate Host)",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Markdown Report Converter5",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Create Case1",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Markdown Report Converter1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Markdown Report Converter",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge": {
+      "main": [
+        [
+          {
+            "node": "Decision Engine",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Update Alerts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Case": {
+      "main": [
+        [
+          {
+            "node": "Add Observables",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Case1": {
+      "main": [
+        [
+          {
+            "node": "Add Observables1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Block IP": {
+      "main": [
+        [
+          {
+            "node": "Apply Changes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "has_osint_targets": {
+      "main": [
+        [
+          {
+            "node": "Call 'Dispatcher'",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Merge Alerts",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Merge Alerts": {
+      "main": [
+        [
+          {
+            "node": "Post-Enrichment + Risk Engine",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Post-Enrichment + Risk Engine": {
+      "main": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IOC Extractor": {
+      "main": [
+        [
+          {
+            "node": "IOC Response Router",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IOC Response Router": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Block IP",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Markdown Report Converter3",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Insert into \"malicious_domains\" data table",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "hash hunt": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse the Results": {
+      "main": [
+        [
+          {
+            "node": "delete_file",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Over Items": {
+      "main": [
+        [
+          {
+            "node": "Parse the Results",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "hash hunt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Hostname to Client_id Mapper (Isolate Host)": {
+      "main": [
+        [
+          {
+            "node": "isolate_host",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Markdown Report Converter1": {
+      "main": [
+        [
+          {
+            "node": "SendMessage MEDIUM",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If (Deduplicate)": {
+      "main": [
+        [
+          {
+            "node": "Prepare Alerts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "norm-db": {
+      "main": [
+        [
+          {
+            "node": "Insert alerts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Markdown Report Converter2": {
+      "main": [
+        [
+          {
+            "node": "Mattermost Send Message2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "isolate_host": {
+      "main": [
+        [
+          {
+            "node": "Markdown Report Converter2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Markdown Report Converter3": {
+      "main": [
+        [
+          {
+            "node": "Mattermost Send Message3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Apply Changes": {
+      "main": [
+        []
+      ]
+    },
+    "Markdown Report Converter4": {
+      "main": [
+        [
+          {
+            "node": "Mattermost Send Message4",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "delete_file": {
+      "main": [
+        [
+          {
+            "node": "Markdown Report Converter4",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Markdown Report Converter5": {
+      "main": [
+        [
+          {
+            "node": "SendMessage HIGH",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "ec5c02cb-5f4f-441a-bea0-65b62d0fd330",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "6175e97e0865c485819f10cbbdadf041641f45b48c7192bd60d25444ae086a9b"
+  },
+  "id": "xoITyVPAXDuEcOR2",
+  "tags": []
+}
