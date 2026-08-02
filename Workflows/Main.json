@@ -1,0 +1,758 @@
+{
+  "name": "Main",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 20
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        -240,
+        -208
+      ],
+      "id": "f1cfab2e-7020-405c-b7ff-535fd1e57858",
+      "name": "Schedule Trigger"
+    },
+    {
+      "parameters": {
+        "jsCode": "function toKabul(ts) {\n  if (!ts) return null;\n  const d = new Date(ts);\n  if (isNaN(d.getTime())) return null;\n\n  return new Intl.DateTimeFormat(\"en-GB\", {\n    timeZone: \"Asia/Kabul\",\n    year: \"numeric\",\n    month: \"2-digit\",\n    day: \"2-digit\",\n    hour: \"2-digit\",\n    minute: \"2-digit\",\n    second: \"2-digit\",\n    hour12: false\n  }).format(d);\n}\n\nconst results = [];\n\nfor (const hit of $json.hits.hits) {\n\n  const src = hit._source;\n\n  const baseTs =\n    src[\"@timestamp\"] ||\n    src.soc_timestamp ||\n    src[\"event.ingested\"] ||\n    src.sensoroni?.timestamp ||\n    null;\n\n  src.event_timestamp_utc = baseTs || null;\n  src.event_local_time = toKabul(baseTs);\n\n  results.push(src);\n}\n\nreturn results;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        448,
+        -208
+      ],
+      "id": "dbf1488c-9097-488c-a9dd-dcce41186594",
+      "name": "Convert to Kabul Timezone"
+    },
+    {
+      "parameters": {
+        "jsCode": "const now = new Date();\nconst past = new Date(now.getTime() - 12000 * 60 * 1000);\n\nreturn [{\n  now: now.toISOString(),\n  past: past.toISOString()\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        0,
+        -208
+      ],
+      "id": "218166c7-fc4c-493d-9b49-d62d835feb5f",
+      "name": "Create past & now dates"
+    },
+    {
+      "parameters": {
+        "url": "https://so2-ssh-tunnel:9200/.internal.alerts-security.alerts-*/_search?size=15",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"query\": {\n    \"range\": {\n      \"@timestamp\": {\n        \"gte\": \"{{ $json.past }}\",\n        \"lte\": \"{{ $json.now }}\"\n      }\n    }\n  },\n  \"sort\": [\n    { \"@timestamp\": { \"order\": \"desc\" } }\n  ]\n}\n\n",
+        "options": {
+          "allowUnauthorizedCerts": true
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        240,
+        -112
+      ],
+      "id": "a4a89a98-7877-4958-966f-028927d4b63c",
+      "name": "Elastic Alerts",
+      "retryOnFail": false,
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "TWgS4xZZMDjmkn5M",
+          "name": "SO2 Creds"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "https://so2-ssh-tunnel:9200/.ds-logs-suricata.alerts*/_search",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"query\": {\n    \"range\": {\n      \"@timestamp\": {\n        \"gte\": \"{{ $json.past }}\",\n        \"lte\": \"{{ $json.now }}\"\n      }\n    }\n  },\n  \"sort\": [\n    { \"@timestamp\": { \"order\": \"desc\" } }\n  ]\n}\n\n",
+        "options": {
+          "allowUnauthorizedCerts": true
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        224,
+        -368
+      ],
+      "id": "25f4d3e6-3a1e-448e-a02f-8d473199b310",
+      "name": "Suricata Alerts",
+      "alwaysOutputData": false,
+      "retryOnFail": false,
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "TWgS4xZZMDjmkn5M",
+          "name": "SO2 Creds"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "function toKabul(ts) {\n  if (!ts) return null;\n  const d = new Date(ts);\n  if (isNaN(d.getTime())) return null;\n\n  return new Intl.DateTimeFormat(\"en-GB\", {\n    timeZone: \"Asia/Kabul\",\n    year: \"numeric\",\n    month: \"2-digit\",\n    day: \"2-digit\",\n    hour: \"2-digit\",\n    minute: \"2-digit\",\n    second: \"2-digit\",\n    hour12: false\n  }).format(d);\n}\n\nconst results = [];\n\nfor (const hit of $json.hits.hits) {\n\n  const src = hit._source;\n\n  const baseTs =\n    src[\"@timestamp\"] ||\n    src.soc_timestamp ||\n    src[\"event.ingested\"] ||\n    src.sensoroni?.timestamp ||\n    null;\n\n  src.event_timestamp_utc = baseTs || null;\n  src.event_local_time = toKabul(baseTs);\n\n  results.push(src);\n}\n\nreturn results;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        448,
+        16
+      ],
+      "id": "399c429e-25d5-43d4-bf60-bbb05511ae9f",
+      "name": "Convert to Kabul Timezone1"
+    },
+    {
+      "parameters": {
+        "numberInputs": 3
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        1152,
+        -80
+      ],
+      "id": "865f0035-443b-42b8-abce-5cc243fd2f61",
+      "name": "Merge"
+    },
+    {
+      "parameters": {
+        "jsCode": "const FIVE_MIN = 5 * 60 * 1000;\n\nfunction safe(v) {\n  if (v === undefined || v === null || v === \"\") return \"na\";\n  return String(v).trim();\n}\n\nreturn items.map(item => {\n  const alert = item.json;\n\n  // Better bucket: Use the already-fixed ISO timestamp from Asset Enrichment\n  let bucketTime = alert.timestamps?.original;\n  if (!bucketTime) bucketTime = new Date();\n  \n  const eventTime = new Date(bucketTime);\n  // Create a stable 5-minute bucket string (YYYY-MM-DDTHH:mm) \n  const year = eventTime.getUTCFullYear();\n  const month = String(eventTime.getUTCMonth() + 1).padStart(2, '0');\n  const day = String(eventTime.getUTCDate()).padStart(2, '0');\n  const hour = String(eventTime.getUTCHours()).padStart(2, '0');\n  const minute = String(Math.floor(eventTime.getUTCMinutes() / 5) * 5).padStart(2, '0');\n  \n  const bucket_5m = `${year}-${month}-${day}T${hour}:${minute}:00Z`;\n  alert.timestamps.bucket_5m = bucket_5m;\n\n  // === Much stronger dedup_key ===\n  const ruleName = safe(alert.rule?.name);\n  const srcIp = safe(alert.network?.src_ip);\n  const dstIp = safe(alert.network?.dst_ip);\n  const srcHostname = safe(alert.asset_context?.src_asset?.hostname);\n  const mitreKey = alert.rule?.mitre && alert.rule.mitre.length > 0 \n    ? safe(alert.rule.mitre[0].tactic?.id || \"na\") \n    : \"na\";\n\n  alert.dedup_key = [\n    ruleName,\n    srcIp,\n    dstIp,\n    srcHostname,           // Very important for process alerts\n    mitreKey,              // Helps distinguish different tactics on same host\n    bucket_5m\n  ].join(\"|\");\n\n  return { json: alert };\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1536,
+        -144
+      ],
+      "id": "fe665eb3-e937-4513-99dc-cf4c87d45c49",
+      "name": "Time-Bucket Dedup"
+    },
+    {
+      "parameters": {
+        "jsCode": "const grouped = {};\n\nfunction normalizeValue(v) {\n  if (v === undefined || v === null || v === \"\") return null;\n  return String(v).trim();\n}\n\nfor (const item of items) {\n  const alert = item.json;\n  const key = alert.dedup_key || \"unknown\";\n\n  if (!alert.artifacts) alert.artifacts = [];\n\n  // Clean artifacts without destroying original casing for readability\n  const cleanedArtifacts = alert.artifacts\n    .filter(o => o && o.dataType && o.data)\n    .map(o => ({\n      dataType: o.dataType,\n      data: normalizeValue(o.data)   // only normalize for dedup purposes\n    }));\n\n  if (!grouped[key]) {\n    grouped[key] = {\n      ...alert,\n      count: 1,\n      artifacts: [...cleanedArtifacts],\n      related_alerts: [alert.rule?.name].filter(Boolean),\n      firstSeen: alert.timestamps?.original,\n      lastSeen: alert.timestamps?.original,\n      // New helpful fields for AI + TheHive\n      asset_flow: alert.asset_flow,\n      soc_priority: alert.soc_priority,\n      primary_asset: alert.asset_context?.src_asset?.hostname || \"Unknown\",\n      mitre_summary: alert.rule?.mitre?.[0]?.tactic?.name || null\n    };\n  } else {\n    const g = grouped[key];\n\n    g.count += 1;\n\n    // Update time window\n    if (alert.timestamps?.original) {\n      if (!g.firstSeen || alert.timestamps.original < g.firstSeen)\n        g.firstSeen = alert.timestamps.original;\n      if (!g.lastSeen || alert.timestamps.original > g.lastSeen)\n        g.lastSeen = alert.timestamps.original;\n    }\n\n    // Merge artifacts (deduplicated)\n    const existing = new Set(g.artifacts.map(o => `${o.dataType}:${o.data}`));\n    for (const obs of cleanedArtifacts) {\n      const fingerprint = `${obs.dataType}:${obs.data}`;\n      if (!existing.has(fingerprint)) {\n        g.artifacts.push(obs);\n        existing.add(fingerprint);\n      }\n    }\n\n    // Merge related rule names\n    if (alert.rule?.name && !g.related_alerts.includes(alert.rule.name)) {\n      g.related_alerts.push(alert.rule.name);\n    }\n\n    // Keep the highest soc_priority\n    if (alert.soc_priority > g.soc_priority) {\n      g.soc_priority = alert.soc_priority;\n    }\n\n    // Keep the most \"interesting\" asset_flow if they differ\n    if (alert.asset_flow && alert.asset_flow !== \"Single Host Activity\" && \n        g.asset_flow === \"Single Host Activity\") {\n      g.asset_flow = alert.asset_flow;\n    }\n  }\n}\n\n// Final output\nreturn Object.values(grouped).map(g => ({\n  json: {\n    ...g,\n    related_alerts: [...new Set(g.related_alerts)],   // final dedup\n    // Optional: add a short summary for the AI agent\n    summary: `${g.count} alerts | ${g.primary_asset} | ${g.asset_flow} | ${g.rule?.name || 'Multiple rules'}`\n  }\n}));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1728,
+        -272
+      ],
+      "id": "dd34a376-fd22-4f67-a258-2dad51046d1f",
+      "name": "Aggregate"
+    },
+    {
+      "parameters": {
+        "jsCode": "return items.map(item => {\n  const alert = item.json;\n\n  const count = alert.count || 1;\n  const firstSeen = alert.firstSeen || alert.timestamps?.original;\n  const lastSeen = alert.lastSeen || alert.timestamps?.original;\n\n  // === Clean, Informative Title ===\n  const title = [\n    alert.rule?.name || \"Security Alert\",\n    alert.primary_asset ? `on ${alert.primary_asset}` : \"\",\n    alert.asset_flow ? `(${alert.asset_flow})` : \"\"\n  ].filter(Boolean).join(\" \");\n\n  // === Rich Description for Analysts ===\n  const description = `\nAggregated ${count} alert(s) in 5-minute window\n\n• Asset          : ${alert.primary_asset || \"Unknown\"} (${alert.asset_context?.src_asset?.role || \"Unknown role\"})\n• Flow           : ${alert.asset_flow || \"Unknown\"}\n• SOC Priority   : ${alert.soc_priority || alert.rule?.severity || 3}\n• MITRE Summary  : ${alert.mitre_summary || \"None\"}\n• First seen     : ${firstSeen || \"N/A\"}\n• Last seen      : ${lastSeen || \"N/A\"}\n`.trim();\n\n  // === Analyst Summary - Short & High-Value for AI Agent ===\n  const analyst_summary = `\n${count} alerts on ${alert.primary_asset || \"Unknown asset\"} (${alert.asset_context?.src_asset?.role || \"Unknown\"}).\n\nType: ${alert.asset_flow || \"Unknown\"}\nMITRE: ${alert.mitre_summary || \"None\"}\nPriority: ${alert.soc_priority || alert.rule?.severity || 3}\n\nTime window: ${firstSeen ? new Date(firstSeen).toISOString() : \"N/A\"} → ${lastSeen ? new Date(lastSeen).toISOString() : \"N/A\"}\n`.trim();\n\n  // === Safe Artifacts for TheHive ===\n  const safeArtifacts = (alert.artifacts || []).map(obs => {\n    let dataType = obs.dataType || \"other\";\n    let data = String(obs.data || \"\").trim();\n\n    if ([\"filepath\", \"file_path\", \"file\", \"filename\"].includes(dataType)) {\n      dataType = \"file\";\n      data = data.split(/[\\\\/]/).pop() || data;   // Only filename\n    }\n\n    if (dataType === \"command_line\") {\n      dataType = \"other\";\n    }\n\n    return { dataType, data };\n  });\n\n  // === Rich Custom Fields - Optimized for AI Agent ===\n  const customFields = {\n    soc_priority: alert.soc_priority || alert.rule?.severity || 3,\n    asset_flow: alert.asset_flow || \"Unknown\",\n    primary_asset: alert.primary_asset || \"Unknown\",\n    primary_hostname: alert.asset_context?.src_asset?.hostname || \"Unknown\",\n    primary_role: alert.asset_context?.src_asset?.role || \"Unknown\",\n    primary_os: alert.asset_context?.src_asset?.os || \"Unknown\",\n    mitre_summary: alert.mitre_summary || \"None\",\n    detection_source: alert.source || \"unknown\",\n    alert_count: count,\n    dedup_key: alert.dedup_key || \"none\",\n    full_file_paths: (alert.artifacts || [])\n      .filter(a => [\"filepath\", \"file_path\", \"file\"].includes(a.dataType))\n      .map(a => a.data)\n      .join(\" | \"),\n    full_command_lines: (alert.artifacts || [])\n      .filter(a => a.dataType === \"command_line\")\n      .map(a => a.data)\n      .join(\" | \")\n  };\n\n  return {\n    json: {\n      type: \"external\",\n      source: \"n8n\",\n      sourceRef: alert.dedup_key \n        ? alert.dedup_key.toLowerCase().replace(/[^a-z0-9]/g, \"_\").slice(0, 100)\n        : `alert_${Date.now()}`,\n\n      title: title,\n      description: description,\n\n      severity: alert.soc_priority || alert.rule?.severity || 3,\n      date: firstSeen ? new Date(firstSeen).getTime() : Date.now(),\n\n      tlp: 2,\n      pap: 2,\n\n      tags: [\n        \"n8n\",\n        alert.source || \"elastic\",\n        alert.asset_flow ? alert.asset_flow.toLowerCase().replace(/\\s+/g, \"-\") : \"single-host\"\n      ].filter(Boolean),\n\n      artifacts: safeArtifacts,\n\n      // All context the AI agent needs\n      customFields: customFields,\n\n      // Dedicated short summary field for the AI\n      analyst_summary: analyst_summary\n    }\n  };\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1936,
+        -128
+      ],
+      "id": "661df38c-9189-4fb8-b9ec-361fba5e185f",
+      "name": "Case-Builder"
+    },
+    {
+      "parameters": {
+        "jsCode": "function pick(...values) {\n  for (const v of values) {\n    if (v !== undefined && v !== null && v !== \"\") return v;\n  }\n  return null;\n}\n\nfunction bucket5m(ts) {\n  if (!ts) return null;\n  const d = new Date(ts);\n  if (isNaN(d.getTime())) return null;\n\n  const floored = Math.floor(d.getMinutes() / 5) * 5;\n  d.setMinutes(floored);\n  d.setSeconds(0);\n  d.setMilliseconds(0);\n\n  return d.toISOString();\n}\n\nfunction mapType(type) {\n\n  const map = {\n    ip: \"ip\",\n    port: \"other\",\n    protocol: \"other\",\n    domain: \"domain\",\n    community_id: \"other\"\n  };\n\n  return map[type] || \"other\";\n}\n\nfunction isValidDomain(d) {\n  if (!d) return false;\n\n  const v = String(d).trim().toLowerCase();\n\n  if (v.startsWith(\".\")) return false;\n  if (v === \"get\") return false;\n\n  return true;\n}\n\nfunction buildArtifacts(ctx) {\n\n  const artifacts = [];\n  const seen = new Set();\n\n  function push(type, value) {\n\n    if (!value) return;\n\n    const v = String(value).trim();\n\n    if (!v) return;\n\n    const key = `${type}:${v}`;\n\n    if (seen.has(key)) return;\n    seen.add(key);\n\n    artifacts.push({\n      dataType: mapType(type),\n      data: v\n    });\n  }\n\n  // useful artifacts\n  push(\"ip\", ctx.src_ip);\n  push(\"ip\", ctx.dst_ip);\n\n  if (isValidDomain(ctx.domain)) {\n    push(\"domain\", ctx.domain);\n  }\n\n  return artifacts;\n}\n\nconst normalized = [];\n\nfor (const item of $input.all()) {\n\n  const src = item.json;\n\n  const baseTs = pick(\n    src[\"@timestamp\"],\n    src.event_timestamp_utc\n  );\n\n  const id = pick(\n    src.log?.id?.uid,\n    src.rule?.uuid,\n    src.network?.community_id\n  );\n\n  const rule = {\n    name: pick(src.rule?.name),\n    severity: pick(src.event?.severity, src.rule?.severity)\n  };\n\n  const network = {\n    src_ip: pick(src.source?.ip),\n    src_port: pick(src.source?.port),\n    dst_ip: pick(src.destination?.ip),\n    dst_port: pick(src.destination?.port),\n    protocol: pick(src.network?.transport),\n    community_id: pick(src.network?.community_id)\n  };\n\n  const dns_query = pick(src.dns?.query_name);\n\n  const artifacts = buildArtifacts({\n    src_ip: network.src_ip,\n    src_port: network.src_port,\n    dst_ip: network.dst_ip,\n    dst_port: network.dst_port,\n    protocol: network.protocol,\n    domain: dns_query,\n    community_id: network.community_id\n  });\n\n  normalized.push({\n    id,\n    source: \"suricata\",\n    rule,\n    network,\n    artifacts,\n    timestamps: {\n      original: baseTs,\n      bucket_5m: bucket5m(baseTs)\n    }\n  });\n\n}\n\nreturn normalized.map(n => ({ json: n }));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        832,
+        -208
+      ],
+      "id": "4f1cf7bc-b87e-4857-a708-82b43e92e049",
+      "name": "Normalize-S"
+    },
+    {
+      "parameters": {
+        "jsCode": "function safe(v, def = null) {\n  return v !== undefined && v !== null ? v : def;\n}\n\nfunction pick(...values) {\n  for (const v of values) {\n    if (v !== undefined && v !== null) return v;\n  }\n  return null;\n}\n\nfunction bucket5m(ts) {\n  if (!ts) return null;\n  const d = new Date(ts);\n  if (isNaN(d.getTime())) return null;\n  const floored = Math.floor(d.getMinutes() / 5) * 5;\n  d.setMinutes(floored);\n  d.setSeconds(0);\n  d.setMilliseconds(0);\n  return d.toISOString();\n}\n\nfunction mapSeverity(sev) {\n  if (!sev) return 1;\n  const map = { low: 1, medium: 2, high: 3, critical: 4 };\n  if (typeof sev === \"number\") return sev;\n  return map[String(sev).toLowerCase()] ?? 1;\n}\n\nfunction mapType(type) {\n  const map = {\n    ip: \"ip\",\n    port: \"other\",\n    protocol: \"other\",\n    process_name: \"other\",\n    parent_process_name: \"other\",\n    file_path: \"other\",        // ← Changed from \"file\"\n    file_name: \"other\",        // ← Changed from \"filename\"\n    command_line: \"other\",\n    parent_command_line: \"other\",\n    hash: \"hash\",\n    url: \"url\",\n    domain: \"domain\",\n    user: \"other\",\n    host: \"hostname\",\n    user_agent: \"user-agent\",\n    http_method: \"other\"\n  };\n  return map[type] || \"other\";\n}\n\nfunction buildArtifacts(ctx) {\n  const artifacts = [];\n  const seen = new Set();\n\n  function push(type, value) {\n    if (!value) return;\n    const v = String(value).trim();\n    const key = `${type}:${v}`;\n    if (seen.has(key)) return;\n    seen.add(key);\n    artifacts.push({ dataType: mapType(type), data: v });\n  }\n\n  push(\"ip\", ctx.src_ip);\n  push(\"ip\", ctx.dst_ip);\n  push(\"process_name\", ctx.process_name);\n  push(\"parent_process_name\", ctx.parent_process_name);\n  push(\"file_path\", ctx.process_path);\n  push(\"file_name\", ctx.process_file);\n  push(\"command_line\", ctx.process_cmd);\n  push(\"parent_command_line\", ctx.parent_process_cmd);\n  push(\"hash\", ctx.process_hash);\n  push(\"filepath\", ctx.file_path_full);\n  push(\"url\", ctx.url);\n  push(\"domain\", ctx.domain);\n  push(\"user_agent\", ctx.user_agent);\n  push(\"user\", ctx.username);\n  push(\"host\", ctx.host);\n\n  return artifacts;\n}\n\nreturn items.map(item => {\n  const j = item.json;\n\n  const eventTime = pick(j[\"@timestamp\"], j.event?.created, j.event?.ingested);\n  const bucket_5m = bucket5m(eventTime);\n\n  const ruleName = pick(\n    j[\"kibana.alert.rule.name\"],\n    j.rule?.name,\n    j.signal?.rule?.name,\n    j.event?.action,\n    \"elastic_alert\"\n  );\n\n  const severity = mapSeverity(\n    pick(j[\"kibana.alert.severity\"], j[\"kibana.alert.rule.severity\"], j.event?.severity, j.signal?.rule?.severity)\n  );\n\n  // MITRE (unchanged — already perfect)\n  const threat = pick(j[\"kibana.alert.rule.threat\"], j[\"kibana.alert.rule.parameters\"]?.threat, j.threat) || [];\n  const mitre = threat.map(entry => ({\n    tactic: entry.tactic ? { id: entry.tactic.id, name: entry.tactic.name } : null,\n    techniques: (entry.technique || []).map(tech => ({\n      id: tech.id,\n      name: tech.name,\n      subtechnique: (tech.subtechnique || []).map(st => ({ id: st.id, name: st.name }))\n    }))\n  })).filter(Boolean);\n\n  // === ENHANCED extraction for threshold alerts + all common Elastic fields ===\n  const src_ip = pick(j[\"source.ip\"], j.source?.ip);\n  const src_port = pick(j[\"source.port\"], j.source?.port);\n  const dst_ip = pick(j[\"destination.ip\"], j.destination?.ip);\n  const dst_port = pick(j[\"destination.port\"], j.destination?.port);\n  const protocol = pick(j.network?.transport, j.network?.protocol);\n\n  const process_path = pick(j.process?.executable, j.winlog?.event_data?.Image);\n  const process_file = process_path ? process_path.split(\"\\\\\").pop() : null;\n  const process_name = pick(j.process?.name, process_file);\n\n  const process_cmd = pick(j.process?.command_line, j.winlog?.event_data?.CommandLine);\n\n  const process_hash = pick(\n    j.process?.hash?.sha256, j.process?.hash?.sha1, j.process?.hash?.md5,\n    j.winlog?.event_data?.Hashes\n  );\n\n  const parent_process_path = pick(j.process?.parent?.executable, j.winlog?.event_data?.ParentImage);\n  const parent_process_file = parent_process_path ? parent_process_path.split(\"\\\\\").pop() : null;\n  const parent_process_name = pick(j.process?.parent?.name, parent_process_file);\n  const parent_process_cmd = pick(j.process?.parent?.command_line, j.winlog?.event_data?.ParentCommandLine);\n\n  const file_path_full = pick(\n    j.file?.path, j.winlog?.event_data?.TargetFilename,\n    j.winlog?.event_data?.FileName, process_path\n  );\n\n  const url = pick(j.url?.full, j.http?.request?.referrer);\n  const domain = pick(j.url?.domain, j.destination?.domain);\n  const http_method = pick(j.http?.request?.method);\n  const user_agent = pick(j.user_agent?.original);\n\n  // === CRITICAL FIX for threshold alerts ===\n  const username = pick(\n    j.user?.name,\n    j[\"user.name\"],\n    j.winlog?.event_data?.TargetUserName,\n    j.winlog?.event_data?.User,\n    j[\"kibana.alert.original_event\"]?.user?.name\n  );\n\n  const host = pick(\n    j.host?.hostname,\n    j.host?.name,\n    j[\"host.name\"],\n    j[\"kibana.alert.original_event\"]?.host?.name,\n    j.agent?.name\n  );\n\n  const artifacts = buildArtifacts({\n    src_ip, dst_ip, process_name, process_path, process_file, process_cmd, process_hash,\n    parent_process_name, parent_process_cmd,\n    file_path_full,\n    url, domain, http_method, user_agent,\n    username, host\n  });\n\n  return {\n    json: {\n      id: pick(j[\"kibana.alert.uuid\"], j._id),\n      source: \"elastic\",\n      rule: { name: ruleName, severity, mitre },\n      network: { src_ip, src_port, dst_ip, dst_port, protocol },\n      artifacts,\n      timestamps: { original: eventTime, bucket_5m }\n    }\n  };\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        832,
+        16
+      ],
+      "id": "884ed5bc-99df-4512-92a7-32fea2cadf09",
+      "name": "Normalize-E"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://thehive:9000/api/alert",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{\n{\n  \"type\": \"external\",\n  \"source\": \"n8n\",\n  \"sourceRef\": $json.sourceRef,\n  \"title\": $json.title,\n  \"description\": $json.description,\n  \"severity\": $json.severity,\n  \"date\": $json.date,\n  \"tlp\": $json.tlp,\n  \"pap\": $json.pap,\n  \"tags\": $json.tags,\n  \"artifacts\": $json.artifacts,\n  \"customFields\": $json.customFields\n}\n}}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        2160,
+        -48
+      ],
+      "id": "c375a9e6-6b6d-4a08-b859-ad96d3a0532a",
+      "name": "TheHive Alert Creation",
+      "retryOnFail": true,
+      "maxTries": 5,
+      "credentials": {
+        "httpBearerAuth": {
+          "id": "QsgeguY0Q9QxMiiB",
+          "name": "TheHive Bearer"
+        },
+        "httpHeaderAuth": {
+          "id": "pQl492rL75o1EGW7",
+          "name": "TheHive Header Auth"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "function pick(...values) {\n  for (const v of values) {\n    if (v !== undefined && v !== null && v !== \"\") return v;\n  }\n  return null;\n}\n\nfunction bucket5m(ts) {\n  if (!ts) return null;\n  const d = new Date(ts);\n  if (isNaN(d.getTime())) return null;\n  const floored = Math.floor(d.getMinutes() / 5) * 5;\n  d.setMinutes(floored);\n  d.setSeconds(0);\n  d.setMilliseconds(0);\n  return d.toISOString();\n}\n\nfunction mapType(type) {\n  const map = {\n    ip: \"ip\",\n    port: \"other\",\n    protocol: \"other\",\n    domain: \"domain\",\n    url: \"url\",\n    user_agent: \"user-agent\",\n    http_method: \"other\",\n    signature: \"other\"\n  };\n  return map[type] || \"other\";\n}\n\nfunction isIPv4(value) {\n  return /^(25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)(\\.(25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)){3}$/.test(value);\n}\n\nfunction buildArtifacts(ctx) {\n  const artifacts = [];\n  const seen = new Set();\n\n  function push(type, value) {\n    if (!value) return;\n    const v = String(value).trim();\n    const key = `${type}:${v}`;\n    if (seen.has(key)) return;\n    seen.add(key);\n    artifacts.push({ dataType: mapType(type), data: v });\n  }\n\n  push(\"ip\", ctx.src_ip);\n  push(\"ip\", ctx.dst_ip);\n  push(\"port\", ctx.src_port);\n  push(\"port\", ctx.dst_port);\n  push(\"protocol\", ctx.protocol);\n  push(\"url\", ctx.url);           // XSS payload should land here\n  push(\"user_agent\", ctx.user_agent);\n  push(\"http_method\", ctx.http_method);\n  if (ctx.hostname) {\n    if (isIPv4(ctx.hostname)) {\n      push(\"ip\", ctx.hostname);       // correct classification\n    } else {\n        push(\"domain\", ctx.hostname);\n      }\n    }\n  push(\"signature\", ctx.signature);\n\n  return artifacts;\n}\n\nreturn items.map(item => {\n  const j = item.json;\n\n  // Robust parsing of the raw field\n  let raw = {};\n  try {\n    raw = JSON.parse(j.raw || \"{}\");\n  } catch (e) {\n    // If parsing fails, try to clean escaped quotes\n    try {\n      const cleaned = j.raw.replace(/\\\\\"/g, '\"');\n      raw = JSON.parse(cleaned);\n    } catch (e2) {\n      raw = {};\n    }\n  }\n\n  const eventTime = pick(\n    j.timestamp,\n    raw.timestamp,\n    j.received_at\n  );\n\n  const bucket_5m = bucket5m(eventTime);\n\n  const ruleName = pick(\n    j.signature,\n    raw.alert?.signature,\n    \"OPNsense IDS Alert\"\n  );\n\n  const severity = Number(pick(j.severity, raw.alert?.severity, 1));\n\n  const src_ip = pick(j.src_ip, raw.src_ip);\n  const src_port = pick(j.src_port, raw.src_port);\n  const dst_ip = pick(j.dst_ip, raw.dest_ip, raw.destination?.ip);\n  const dst_port = pick(j.dst_port, raw.dest_port, raw.destination?.port);\n  const protocol = pick(j.proto, raw.proto);\n\n  // === More robust HTTP extraction ===\n  const httpObj = raw.http || raw.Http || {};\n  let url = pick(\n    httpObj.url,\n    httpObj.full_url,\n    httpObj.request?.url\n  );\n\n  // Fallback: reconstruct URL from hostname + url\n  if (!url && httpObj.hostname) {\n    const path = httpObj.url || httpObj.path || \"\";\n    url = `http://${httpObj.hostname}${path.startsWith('/') ? path : '/' + path}`;\n  }\n\n  const user_agent = pick(httpObj.http_user_agent, httpObj.user_agent);\n  const http_method = pick(httpObj.http_method, httpObj.method);\n  const hostname = pick(httpObj.hostname);\n\n  const artifacts = buildArtifacts({\n    src_ip,\n    src_port,\n    dst_ip,\n    dst_port,\n    protocol,\n    url,                    // ← This should now capture the XSS payload\n    user_agent,\n    http_method,\n    hostname,\n    signature: ruleName\n  });\n\n  return {\n    json: {\n      id: j.event_id || j.id,\n      source: \"opnsense\",\n      rule: {\n        name: ruleName,\n        severity: severity\n      },\n      network: {\n        src_ip,\n        src_port,\n        dst_ip,\n        dst_port,\n        protocol\n      },\n      artifacts,\n      timestamps: {\n        original: eventTime,\n        bucket_5m\n      },\n      http: {\n        url: url,\n        method: http_method,\n        user_agent: user_agent,\n        hostname: hostname\n      },\n      category: pick(j.category, raw.alert?.category),\n      signature: ruleName\n    }\n  };\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        832,
+        256
+      ],
+      "id": "8f8ae780-7c0c-4b82-8a75-8a7fe07c643d",
+      "name": "Normalize-O"
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "xoITyVPAXDuEcOR2",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/xoITyVPAXDuEcOR2",
+          "cachedResultName": "AI Agent"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        2400,
+        -48
+      ],
+      "id": "151cb804-8822-4f73-9027-7fe221eeb705",
+      "name": "Trigger AI Subworkflow"
+    },
+    {
+      "parameters": {
+        "maxItems": 40,
+        "keep": "lastItems"
+      },
+      "type": "n8n-nodes-base.limit",
+      "typeVersion": 1,
+      "position": [
+        448,
+        256
+      ],
+      "id": "43895026-0c2c-461b-a5f0-a9c2ab74fb05",
+      "name": "Limit"
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "dataTableId": {
+          "__rl": true,
+          "value": "dFvgvdx0CoWq7gl2",
+          "mode": "list",
+          "cachedResultName": "OPNsense_IDS_Alerts",
+          "cachedResultUrl": "/projects/iepneOJcbZRD9xW1/datatables/dFvgvdx0CoWq7gl2"
+        },
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "event_id",
+              "keyValue": "={{ $json.event_id }}"
+            }
+          ]
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "processed": "={{ true }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "event_id",
+              "displayName": "event_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "timestamp",
+              "displayName": "timestamp",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "flow_id",
+              "displayName": "flow_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "src_ip",
+              "displayName": "src_ip",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "src_port",
+              "displayName": "src_port",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "dst_ip",
+              "displayName": "dst_ip",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "dst_port",
+              "displayName": "dst_port",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "proto",
+              "displayName": "proto",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "signature",
+              "displayName": "signature",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "severity",
+              "displayName": "severity",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "category",
+              "displayName": "category",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "raw",
+              "displayName": "raw",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "received_at",
+              "displayName": "received_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "processed",
+              "displayName": "processed",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "boolean",
+              "readOnly": false,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1,
+      "position": [
+        640,
+        256
+      ],
+      "id": "f697eeaf-de4b-49df-9d1b-4f01ef5f29ba",
+      "name": "Update row(s)"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ===== Asset Database (keep your full list here) =====\nconst assetDb = {\n  \"192.168.1.100\": { hostname: \"PDC\", role: \"Domain Controller\", os: \"Windows Server 2022\", segment: \"Network-A\", priority: 5, internal: true },\n  \"192.168.1.120\": { hostname: \"WebServer\", role: \"IIS Web Server\", os: \"Windows Server 2022\", segment: \"Network-A\", priority: 4, internal: true },\n  \"192.168.1.254\": { hostname: \"Firewall-A\", role: \"GW-A Internal\", os: \"OPNsense\", segment: \"Network-A\", priority: 5, internal: true },\n  \"192.168.2.100\": { hostname: \"SecurityOnion\", role: \"SIEM\", os: \"Security Onion 2\", segment: \"Network-B\", priority: 5, internal: true },\n  \"192.168.2.200\": { hostname: \"Velociraptor\", role: \"Incident Response\", os: \"Ubuntu 24.04\", segment: \"Network-B\", priority: 4, internal: true },\n  \"192.168.2.250\": { hostname: \"SOAR-Stack\", role: \"n8n+TheHive\", os: \"Ubuntu 24.04\", segment: \"Network-B\", priority: 5, internal: true },\n  \"192.168.2.254\": { hostname: \"Firewall-B\", role: \"GW-B Internal\", os: \"OPNsense\", segment: \"Network-B\", priority: 5, internal: true },\n  \"172.16.206.14\": { hostname: \"Firewall-A-WAN\", role: \"WAN Interface\", os: \"OPNsense\", segment: \"University-External\", priority: 5, internal: false },\n  \"172.16.218.12\": { hostname: \"Firewall-B-WAN\", role: \"WAN Interface\", os: \"OPNsense\", segment: \"University-External\", priority: 5, internal: false }\n};\n\nconst hostnameDb = {};\nfor (const ip in assetDb) {\n  const asset = assetDb[ip];\n  hostnameDb[asset.hostname.toLowerCase()] = { ...asset, ip };\n}\n\n// ===== Helpers =====\nfunction detectSegment(ip) {\n  if (!ip) return null;\n  if (ip.startsWith(\"192.168.1.\")) return \"Network-A\";\n  if (ip.startsWith(\"192.168.2.\")) return \"Network-B\";\n  return null;\n}\n\nfunction externalAsset(ip) {\n  return { hostname: \"Unknown-External\", ip, segment: \"Internet\", priority: 1, internal: false };\n}\n\nfunction internalUnknown(ip) {\n  const segment = detectSegment(ip);\n  if (!segment) return null;\n  return { hostname: \"Internal-Unknown\", ip, segment, priority: 2, internal: true };\n}\n\nfunction resolveAsset(ip, hostnameFromArtifacts) {\n  if (hostnameFromArtifacts) {\n    const h = hostnameDb[hostnameFromArtifacts.toLowerCase()];\n    if (h) return { ...h, ip: h.ip || ip };\n  }\n  if (ip && assetDb[ip]) return { ...assetDb[ip], ip };\n  const internal = internalUnknown(ip);\n  return internal || externalAsset(ip);\n}\n\nfunction extractHostname(artifacts) {\n  if (!artifacts || !Array.isArray(artifacts)) return null;\n  for (const a of artifacts) {\n    if (a.dataType === \"hostname\" && a.data) return a.data;\n  }\n  return null;\n}\n\n// ===== Smarter Flow Classification =====\nfunction classifyFlow(alert, src_asset, dst_asset) {\n  const ruleName = (alert.rule?.name || \"\").toLowerCase();\n  const mitre = alert.rule?.mitre || [];\n\n  // 1. Explicit network-based indicators\n  if (dst_asset && dst_asset.ip) {\n    if (!src_asset.internal && dst_asset.internal) return \"External Attack\";\n    if (src_asset.internal && !dst_asset.internal) return \"Outbound (C2 likely)\";\n    if (src_asset.internal && dst_asset.internal) {\n      if (src_asset.ip === dst_asset.ip || src_asset.hostname === dst_asset.hostname) \n        return \"Single Host Activity\";\n      if (src_asset.segment !== dst_asset.segment) return \"Cross-Segment Movement\";\n      return \"Lateral Movement\";\n    }\n  }\n\n  // 2. Rule name / MITRE hints (very useful for your Elastic rules)\n  if (ruleName.includes(\"c2\") || ruleName.includes(\"command and control\") || \n      ruleName.includes(\"caldera\") || ruleName.includes(\"sandcat\")) {\n    return \"Outbound C2 / Beaconing\";\n  }\n  if (ruleName.includes(\"kerberoasting\") || ruleName.includes(\"credential\")) {\n    return \"Credential Access (Single Host)\";\n  }\n  if (ruleName.includes(\"privilege escalation\") || ruleName.includes(\"token impersonation\")) {\n    return \"Privilege Escalation (Single Host)\";\n  }\n  if (ruleName.includes(\"webshell\") || ruleName.includes(\"iis worker\") || ruleName.includes(\"payload drop\")) {\n    return \"Web Shell / Execution (Single Host)\";\n  }\n  if (ruleName.includes(\"discovery\") || ruleName.includes(\"account discovery\")) {\n    return \"Discovery (Single Host)\";\n  }\n  if (ruleName.includes(\"admin account creation\") || ruleName.includes(\"persistence\")) {\n    return \"Persistence (Single Host)\";\n  }\n\n  // 3. MITRE-based fallback\n  const hasExecution = mitre.some(m => m.tactic?.id === \"TA0002\");\n  const hasPersistence = mitre.some(m => m.tactic?.id === \"TA0003\");\n  const hasC2 = mitre.some(m => m.tactic?.id === \"TA0011\");\n\n  if (hasC2) return \"Outbound C2 / Beaconing\";\n  if (hasExecution && hasPersistence) return \"Execution + Persistence (Single Host)\";\n  if (hasExecution) return \"Execution (Single Host)\";\n\n  // 4. Final safe fallback\n  return src_asset.internal ? \"Single Host Activity\" : \"External Activity\";\n}\n\n// ===== Main Processing =====\nconst output = [];\nfor (const item of items) {\n  const alert = item.json;\n\n  const src_ip = alert.network?.src_ip || null;\n  const dst_ip = alert.network?.dst_ip || null;\n  const hostname = extractHostname(alert.artifacts);\n\n  const src_asset = resolveAsset(src_ip, hostname);\n  const dst_asset = dst_ip ? resolveAsset(dst_ip, null) : null;\n\n  const asset_context = { src_asset };\n  if (dst_asset) asset_context.dst_asset = dst_asset;\n\n  const flow = classifyFlow(alert, src_asset, dst_asset);\n\n  const soc_priority = Math.max(\n    alert.rule?.severity || 1,\n    src_asset?.priority || 1,\n    (dst_asset?.priority || 1)\n  );\n\n  // Fix bucket_5m if broken\n  if (alert.timestamps?.bucket_5m && typeof alert.timestamps.bucket_5m === \"number\") {\n    const fixed = new Date(alert.timestamps.original);\n    fixed.setSeconds(0, 0);\n    alert.timestamps.bucket_5m = fixed.toISOString();\n  }\n\n  alert.asset_context = asset_context;\n  alert.asset_flow = flow;\n  alert.soc_priority = soc_priority;\n\n  const dedupKey = [\n    alert.rule?.name || \"unknown\",\n    src_ip || \"na\",\n    dst_ip || \"na\",\n    src_asset?.hostname || \"na\",\n    alert.timestamps?.bucket_5m || \"na\"\n  ].join(\"|\");\n\n  alert.dedup_key = dedupKey;\n\n  output.push({ json: alert });\n}\n\nreturn output;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1344,
+        -272
+      ],
+      "id": "79678944-b6d7-410a-95d7-df006a0a81c9",
+      "name": "Asset Enrichment"
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "value": "dFvgvdx0CoWq7gl2",
+          "mode": "list",
+          "cachedResultName": "OPNsense_IDS_Alerts",
+          "cachedResultUrl": "/projects/iepneOJcbZRD9xW1/datatables/dFvgvdx0CoWq7gl2"
+        },
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "processed",
+              "condition": "isFalse"
+            }
+          ]
+        },
+        "returnAll": true
+      },
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1,
+      "position": [
+        240,
+        128
+      ],
+      "id": "61f342d2-c5cb-481b-ba6e-535fae3aa163",
+      "name": "OPNsense IDS alerts"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Create past & now dates",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create past & now dates": {
+      "main": [
+        [
+          {
+            "node": "Elastic Alerts",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Suricata Alerts",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "OPNsense IDS alerts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Convert to Kabul Timezone": {
+      "main": [
+        [
+          {
+            "node": "Normalize-S",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Suricata Alerts": {
+      "main": [
+        [
+          {
+            "node": "Convert to Kabul Timezone",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Convert to Kabul Timezone1": {
+      "main": [
+        [
+          {
+            "node": "Normalize-E",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Elastic Alerts": {
+      "main": [
+        [
+          {
+            "node": "Convert to Kabul Timezone1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge": {
+      "main": [
+        [
+          {
+            "node": "Asset Enrichment",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Time-Bucket Dedup": {
+      "main": [
+        [
+          {
+            "node": "Aggregate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aggregate": {
+      "main": [
+        [
+          {
+            "node": "Case-Builder",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Case-Builder": {
+      "main": [
+        [
+          {
+            "node": "TheHive Alert Creation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize-S": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize-E": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "TheHive Alert Creation": {
+      "main": [
+        [
+          {
+            "node": "Trigger AI Subworkflow",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize-O": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 2
+          }
+        ]
+      ]
+    },
+    "Limit": {
+      "main": [
+        [
+          {
+            "node": "Update row(s)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update row(s)": {
+      "main": [
+        [
+          {
+            "node": "Normalize-O",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Asset Enrichment": {
+      "main": [
+        [
+          {
+            "node": "Time-Bucket Dedup",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OPNsense IDS alerts": {
+      "main": [
+        [
+          {
+            "node": "Limit",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "e302c1e3-4084-4f4a-ae3e-90bb40865042",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "6175e97e0865c485819f10cbbdadf041641f45b48c7192bd60d25444ae086a9b"
+  },
+  "id": "WCeCrquSWCi43q9G",
+  "tags": []
+}
