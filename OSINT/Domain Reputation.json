@@ -1,0 +1,164 @@
+{
+  "name": "Domain Reputation",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "339c22a7-425d-42a5-8e06-9051da9ceada",
+      "name": "Execute Workflow Trigger",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1,
+      "position": [
+        -688,
+        -80
+      ]
+    },
+    {
+      "parameters": {
+        "preBuiltAgentsCalloutHttpRequest": "",
+        "httpVariantWarning": "",
+        "curlImport": "",
+        "method": "GET",
+        "": "",
+        "url": "=https://www.virustotal.com/api/v3/domains/{{ $json.value }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "virusTotalApi",
+        "provideSslCertificates": false,
+        "sendQuery": false,
+        "sendHeaders": false,
+        "sendBody": false,
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": false,
+              "neverError": true,
+              "responseFormat": "autodetect"
+            }
+          }
+        },
+        "infoMessage": ""
+      },
+      "id": "438a1744-872f-41cc-b555-3cba4b33a8ba",
+      "name": "VirusTotal Domain Search",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -224,
+        -144
+      ],
+      "extendsCredential": "virusTotalApi",
+      "credentials": {
+        "virusTotalApi": {
+          "id": "nKn0a1eq197ZDrUQ",
+          "name": "VirusTotal account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "url": "=https://urlscan.io/api/v1/search/?q=page.domain:{{ $json.value }} AND date:>now-30d",
+        "options": {}
+      },
+      "id": "4d4d0d4e-a693-4918-b656-5ff403a54d7e",
+      "name": "urlscan Domain Search",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -240,
+        144
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineByPosition",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        112,
+        -16
+      ],
+      "id": "321e90a9-071b-48fb-9305-4164a7ed5707",
+      "name": "Merge1"
+    },
+    {
+      "parameters": {
+        "jsCode": "return $input.all().map((item, index) => {\n\n  // ✅ Always use deterministic indexing\n  const triggerItems = $items(\"Execute Workflow Trigger\");\n  const originalItem = triggerItems[index]?.json || {};\n\n  // ✅ FIX: support BOTH structures (flat + nested)\n  const originalAlert = originalItem.alert || originalItem;\n\n  const indicatorValue = originalItem.value || \"unknown\";\n\n  // ✅ OSINT results\n  const vtData = $items(\"VirusTotal Domain Search\")[index]?.json || {};\n  const urlscanData = $items(\"urlscan Domain Search\")[index]?.json || {};\n\n  return {\n    json: {\n      alert_id: originalAlert.alert_id || \"unknown\",\n      type: \"domain\",\n      value: indicatorValue,\n\n      // ✅ FIXED: now contains full alert\n      alert: originalAlert,\n\n      lookup_result: {\n        virustotal: vtData.data ? {\n          link: `https://www.virustotal.com/gui/domain/${indicatorValue}`,\n          stats: vtData.data.attributes?.last_analysis_stats || null,\n          reputation: vtData.data.attributes?.reputation || 0,\n          categories: vtData.data.attributes?.categories || {},\n          raw: vtData\n        } : null,\n        urlscan: {\n          link: urlscanData.result || null,\n          screenshot: urlscanData.screenshot || null,\n          overall_score: urlscanData.verdicts?.overall?.score || 0,\n          malicious: urlscanData.verdicts?.overall?.malicious || false,\n          raw: urlscanData\n        },\n        hybrid_analysis: null,\n        malwarebazaar: null\n      }\n    }\n  };\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        336,
+        -64
+      ],
+      "id": "bb9b08d5-3cf4-48c3-a6bf-9d7e2608a6fa",
+      "name": "Merge Report with Alerts"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "VirusTotal Domain Search": {
+      "main": [
+        [
+          {
+            "node": "Merge1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "urlscan Domain Search": {
+      "main": [
+        [
+          {
+            "node": "Merge1",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Execute Workflow Trigger": {
+      "main": [
+        [
+          {
+            "node": "VirusTotal Domain Search",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "urlscan Domain Search",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge1": {
+      "main": [
+        [
+          {
+            "node": "Merge Report with Alerts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "73d44fc3-d34d-4eec-b85c-ce388d1124db",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "6175e97e0865c485819f10cbbdadf041641f45b48c7192bd60d25444ae086a9b"
+  },
+  "id": "aPRYammrijyEE4E7",
+  "tags": []
+}
