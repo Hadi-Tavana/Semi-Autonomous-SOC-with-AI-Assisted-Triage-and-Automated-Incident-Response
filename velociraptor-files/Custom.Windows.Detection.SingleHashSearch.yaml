@@ -1,0 +1,40 @@
+name: Custom.Windows.Detection.SingleHashSearch
+description: |
+  Search multiple paths/globs for a file with a specific hash (MD5, SHA1 or SHA256).
+  Globs should be separated by commas.
+
+precondition:
+  SELECT OS From info() where OS = 'windows'
+
+parameters:
+  - name: TargetGlobs
+    default: "C:/Users/**,C:/Windows/Temp/**,C:/ProgramData/**,C:/Temp/**"
+    description: "Comma separated globs (example: C:/Users/**,C:/Temp/**)"
+
+  - name: HashType
+    default: "MD5"
+
+  - name: HashValue
+    default: ""
+
+sources:
+  - query: |
+      LET hash_type = lowcase(string=HashType)
+      LET ioc_hash = lowcase(string=HashValue)
+      LET globs = split(string=TargetGlobs, sep=",")
+
+      SELECT
+        FullPath,
+        Name as FileName,
+        Size,
+        hash(path=FullPath) as Hash,
+        Mtime, Atime, Ctime, Btime
+      FROM glob(globs=globs)
+      WHERE NOT IsDir 
+        AND NOT IsLink
+        AND Hash != NULL
+        AND (
+             (hash_type = "md5"    AND lowcase(string=Hash.MD5)    = ioc_hash)
+          OR (hash_type = "sha1"   AND lowcase(string=Hash.SHA1)   = ioc_hash)
+          OR (hash_type = "sha256" AND lowcase(string=Hash.SHA256) = ioc_hash)
+        )

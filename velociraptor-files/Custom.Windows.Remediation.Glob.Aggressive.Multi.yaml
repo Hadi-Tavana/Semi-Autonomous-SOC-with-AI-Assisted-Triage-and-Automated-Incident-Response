@@ -1,0 +1,51 @@
+name: Custom.Windows.Remediation.Glob.Aggressive.Multi
+author: Edris Hassani
+description: |
+  LAB USE ONLY.
+  Deletes ALL files and directories matching one or more glob paths.
+  No safety checks. No confirmation. No filtering.
+
+type: CLIENT
+
+required_permissions:
+  - FILESYSTEM_WRITE
+
+parameters:
+  - name: TargetGlobs
+    description: |
+      One glob per line.
+      Example:
+        C:\Users\Administrator\Downloads\test{,\**}
+        C:\Temp\bad.exe
+    default:
+
+sources:
+  - query: |
+      -- Split multiline input into individual globs
+      LET globs = split(string=TargetGlobs, sep="\n")
+
+      -- Expand all globs (FIX: use _value)
+      LET targets = SELECT *
+        FROM foreach(
+          row=globs,
+          query={
+            SELECT *
+            FROM glob(globs=_value)
+          }
+        )
+        ORDER BY OSPath DESC
+
+      -- Delete everything (files + dirs)
+      LET deleted = SELECT
+          OSPath,
+          rm(filename=OSPath) AS Removed,
+          Size,
+          Mtime,
+          Ctime,
+          Btime,
+          IsDir,
+          IsLink
+        FROM targets
+
+      SELECT *
+      FROM deleted
