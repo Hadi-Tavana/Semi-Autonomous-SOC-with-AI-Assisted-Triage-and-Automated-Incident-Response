@@ -21,7 +21,7 @@ We wrote a 3-part series covering the whole build in way more depth than a READM
 
 1. **Part 1: Detection & Ingestion**: how alerts get generated across three different sources and normalized into one pipeline → *https://medium.com/@edrishassani526/building-a-semi-autonomous-soc-part-1-detection-ingestion-ab9596f43852*
 2. **Part 2: AI-Assisted Triage & Risk Scoring**: OSINT enrichment, the local LLM, and the six-factor risk engine that decides what's actually serious → *https://medium.com/@edrishassani526/building-a-semi-autonomous-soc-part-2-ai-assisted-triage-risk-scoring-caa498fdb891*
-3. **Part 3: Automated Response & Red Team Results**: host isolation, file deletion, IP/domain blocking, and what happened when we actually attacked our own lab → *https://medium.com/@edrishassani526/ccc828a1ceb5*
+3. **Part 3: Automated Response & Red Team Results**: host isolation, file deletion, IP/domain blocking, and what happened when we actually attacked our own lab → *https://medium.com/@edrishassani526/building-a-semi-autonomous-soc-part-3-automated-response-red-team-results-ccc828a1ceb5*
 
 
 ## What's actually in here
